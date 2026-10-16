@@ -22,11 +22,11 @@ from ..logging import get_logger
 from ..metrics import LatencyTracker
 from ..models import (
     ErrorEvent,
+    SttEvent,
     Transcript,
     TranscriptFinalEvent,
     TranscriptPartialEvent,
 )
-from .openai_realtime import SttEvent
 
 log = get_logger(__name__)
 

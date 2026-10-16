@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- The backend is a child process of this app. -->
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <!-- Required to spawn the Python backend and the Swift audio helper. -->
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+  <!-- Outbound only, to api.openai.com. No server socket beyond loopback. -->
+  <key>com.apple.security.network.client</key>
+  <true/>
+  <!-- Keychain access for the API key. -->
+  <key>keychain-access-groups</key>
+  <array>
+    <string>$(AppIdentifierPrefix)com.jlt.japanese-live-translator</string>
+  </array>
+</dict>
+</plist>

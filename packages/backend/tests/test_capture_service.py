@@ -125,3 +125,21 @@ async def test_api_key_is_not_passed_to_the_helper(shim: Path, monkeypatch):
     source = await svc.start("app:com.microsoft.teams2")
     assert source.name == "Microsoft Teams"
     await svc.stop()
+
+
+def test_default_helper_path_resolves_inside_the_monorepo():
+    """An off-by-one here once produced `packages/packages/audio-capture`."""
+    from jlt.audio.capture_service import default_helper_path
+
+    path = default_helper_path()
+    assert "packages/packages" not in str(path)
+    assert path.parts[-4:] == ("audio-capture", ".build", "release", "teams-audio-tap") or (
+        path.parts[-4:] == ("audio-capture", ".build", "debug", "teams-audio-tap")
+    )
+
+
+def test_env_override_wins_over_discovery(monkeypatch, tmp_path):
+    from jlt.audio.capture_service import default_helper_path
+
+    monkeypatch.setenv("JLT_AUDIO_HELPER", str(tmp_path / "custom-tap"))
+    assert default_helper_path() == tmp_path / "custom-tap"

@@ -59,16 +59,24 @@ def default_helper_path() -> Path:
     if on_path:
         return Path(on_path)
 
+    # Walk up until the monorepo root is recognisable, rather than counting
+    # parent directories: an off-by-one there produced a path like
+    # `packages/packages/audio-capture` and a confusing "helper not found".
     here = Path(__file__).resolve()
-    repo_root = here.parents[4]
-    candidates = [
-        repo_root / "packages/audio-capture/.build/release/teams-audio-tap",
-        repo_root / "packages/audio-capture/.build/debug/teams-audio-tap",
-    ]
-    for candidate in candidates:
-        if candidate.exists():
-            return candidate
-    return candidates[0]
+    fallback: Path | None = None
+    for ancestor in here.parents:
+        capture_dir = ancestor / "packages" / "audio-capture" / ".build"
+        if not capture_dir.parent.is_dir():
+            continue
+        candidates = [
+            capture_dir / "release" / "teams-audio-tap",
+            capture_dir / "debug" / "teams-audio-tap",
+        ]
+        fallback = fallback or candidates[0]
+        for candidate in candidates:
+            if candidate.exists():
+                return candidate
+    return fallback or Path("teams-audio-tap")
 
 
 class AudioCaptureService:

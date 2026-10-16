@@ -28,3 +28,6 @@ packages/desktop/src-tauri/target/
 
 # Vite build output
 packages/desktop/dist/
+
+# Rust / Tauri build output
+packages/desktop/src-tauri/target/

@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Sequence
 from typing import Protocol, runtime_checkable
 
-from .models import AudioSource, GlossaryEntry, Usage
+from .models import AudioSource, GlossaryEntry, SttEvent, Usage
 
 
 @runtime_checkable
@@ -46,14 +46,6 @@ class SttProvider(Protocol):
     def events(self) -> AsyncIterator[SttEvent]: ...
 
     async def close(self) -> None: ...
-
-
-class SttEvent(Protocol):
-    """Normalized STT event; see `jlt.stt.openai_realtime` for the concrete type."""
-
-    kind: str  # "delta" | "final" | "connected" | "reconnecting" | "error"
-    item_id: str
-    text: str
 
 
 @runtime_checkable

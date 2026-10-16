@@ -49,6 +49,26 @@ def test_redaction_filter_scrubs_registered_secrets():
     assert "local-token-value-xyz" not in record.getMessage()
 
 
+def test_redaction_preserves_printf_style_arguments():
+    """Coercing args to str would break any library logging "%d" with an int.
+
+    uvicorn does exactly that on startup, which is how this was found.
+    """
+    record = logging.LogRecord(
+        "t", logging.INFO, __file__, 1, "Started server process [%d]", (20505,), None
+    )
+    jlt_logging.RedactionFilter().filter(record)
+    assert record.getMessage() == "Started server process [20505]"
+
+
+def test_redaction_still_scrubs_string_arguments():
+    record = logging.LogRecord(
+        "t", logging.INFO, __file__, 1, "key=%s", ("sk-ABCDEFGHIJKLMNOPQRSTUVWXYZ012345",), None
+    )
+    jlt_logging.RedactionFilter().filter(record)
+    assert "sk-ABCDEFGHIJ" not in record.getMessage()
+
+
 def test_json_formatter_scrubs_keys_in_structured_fields():
     record = logging.LogRecord("t", logging.INFO, __file__, 1, "x", None, None)
     record.url = "wss://api.openai.com/?k=sk-ABCDEFGHIJKLMNOPQRSTUVWXYZ012345"

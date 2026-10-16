@@ -11,10 +11,19 @@ Teams audio ──ScreenCaptureKit──► 24 kHz mono PCM16
 
 ## Status
 
-**Phases 0 and 1 are implemented.** Phases 2–6 are specified in
-`docs/development-plan.md` and not yet built. Nothing in this repository claims
-a verification that was not actually performed — see the verification log in
-the development plan.
+**Phases 0–5 are implemented.** Phase 6 (real-meeting testing, benchmarks,
+packaging) remains. Nothing here claims a verification that was not actually
+performed — see the verification log in `docs/development-plan.md`.
+
+Known gaps, stated plainly:
+
+- The audio tap has not been shown to carry an **audible** signal. It produces
+  a byte-exact 24 kHz stream, but every test capture so far was silent because
+  Teams was not playing anything.
+- The Tauri shell compiles but has **not been run**; the Keychain path is
+  unexercised.
+- No end-to-end benchmark exists. Component measurements are in
+  `docs/benchmarks.md` and are labelled as such.
 
 ## Prerequisites
 
@@ -53,11 +62,26 @@ to `.env`.
 ## Setup
 
 ```bash
-make setup          # Python deps, npm deps, and the Swift helper
-make verify-openai  # confirm models and endpoints against the live API
+make setup           # Python deps, npm deps, and the Swift helper
+make verify-openai   # confirm models and endpoints against the live API
+make smoke-stt       # live Japanese transcription round-trip
+make eval-translation  # the golden dataset against the live model
 make test
 make lint
 ```
+
+Live commands read `OPENAI_API_KEY` from `.env` (see `.env.example`).
+
+## Running it
+
+```bash
+make dev     # the full app: Tauri spawns and supervises the backend
+make backend # just the backend; prints its port and token on stdout
+```
+
+`make dev` needs Rust. The backend alone is useful for testing the API with
+`curl`; it binds `127.0.0.1` on an OS-assigned port and prints a single JSON
+handshake line.
 
 ## Verifying audio capture
 

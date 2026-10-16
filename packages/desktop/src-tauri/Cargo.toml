@@ -1,0 +1,25 @@
+[package]
+name = "jlt-desktop"
+version = "0.1.0"
+description = "Japanese Live Translator"
+edition = "2021"
+rust-version = "1.77"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["macos-private-api"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# macOS Keychain. The API key is never written to disk by this app.
+keyring = { version = "3", features = ["apple-native"] }
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+
+[profile.release]
+strip = true
+lto = true
+opt-level = "s"

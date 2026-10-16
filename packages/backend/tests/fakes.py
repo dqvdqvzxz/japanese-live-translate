@@ -173,3 +173,82 @@ def failing_connector(error: Exception):
 
     connect.calls = calls  # type: ignore[attr-defined]
     return connect
+
+
+class FakeCapture:
+    """Audio capture that emits scripted frames and tracks its own cleanup."""
+
+    def __init__(self, frames: list[bytes] | None = None, *, fail_start: Exception | None = None):
+        self._frames = list(frames or [])
+        self._fail_start = fail_start
+        self.started = False
+        self.stopped = False
+        self.start_calls = 0
+        self._release = asyncio.Event()
+
+    async def list_sources(self):
+        from jlt.models import AudioSource
+
+        return [
+            AudioSource(
+                id="app:com.microsoft.teams2",
+                kind="application",
+                name="Microsoft Teams",
+                is_recommended=True,
+            )
+        ]
+
+    async def start(self, source_id: str):
+        from jlt.models import AudioSource
+
+        self.start_calls += 1
+        if self._fail_start is not None:
+            raise self._fail_start
+        self.started = True
+        return AudioSource(id=source_id, kind="application", name="Microsoft Teams")
+
+    async def frames(self):
+        for frame in self._frames:
+            yield frame
+        # Then idle, like a live capture that is simply quiet, so the session
+        # stays up until it is explicitly stopped.
+        await self._release.wait()
+
+    async def stop(self) -> None:
+        self.stopped = True
+        self._release.set()
+
+    @property
+    def level_dbfs(self):
+        return -30.0
+
+
+class ScriptedStt:
+    """An STT provider that emits scripted events on demand."""
+
+    def __init__(self) -> None:
+        self.queue: asyncio.Queue = asyncio.Queue()
+        self.appended: list[bytes] = []
+        self.commits: list[int] = []
+        self.connected = False
+        self.closed = False
+        self.stats = type("S", (), {"reconnects": 0})()
+
+    async def connect(self) -> None:
+        self.connected = True
+
+    async def send_audio(self, pcm: bytes) -> None:
+        self.appended.append(pcm)
+
+    async def commit(self, seq: int) -> None:
+        self.commits.append(seq)
+
+    async def events(self):
+        while True:
+            yield await self.queue.get()
+
+    async def close(self) -> None:
+        self.closed = True
+
+    def emit(self, event) -> None:
+        self.queue.put_nowait(event)

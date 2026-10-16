@@ -213,6 +213,30 @@ class Segment(BaseModel):
     failure_reason: FailureReason | None = None
 
 
+SttEventKind = Literal["delta", "final", "connected", "reconnecting", "error"]
+
+
+class SttEvent(BaseModel):
+    """A normalized speech-to-text event.
+
+    Defined here rather than in the STT package so that `jlt.interfaces` can
+    reference it without depending on a concrete provider: the protocol and the
+    implementation must agree on one type, not two structurally similar ones.
+    """
+
+    kind: SttEventKind
+    item_id: str = ""
+    #: Locally assigned ordering key; see `Transcript.seq`.
+    seq: int = 0
+    text: str = ""
+    #: commit → completed, in milliseconds. Only set on `final`.
+    latency_ms: float | None = None
+    code: str = ""
+    message: str = ""
+
+    model_config = {"frozen": True}
+
+
 class GlossaryEntry(BaseModel):
     ja: str
     vi: str

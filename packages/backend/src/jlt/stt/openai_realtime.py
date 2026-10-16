@@ -28,34 +28,20 @@ import random
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any, Literal, Protocol
+from typing import Any, Protocol
 
 from ..config import SAMPLE_RATE_HZ, STT_MODEL, SttSettings, realtime_url_candidates
 from ..logging import get_logger
-from ..models import GlossaryEntry
+from ..models import GlossaryEntry, SttEvent
 from ..secrets import Secret
 
 log = get_logger(__name__)
-
-SttEventKind = Literal["delta", "final", "connected", "reconnecting", "error"]
 
 #: Characters the API rejects inside a transcription keyword.
 _FORBIDDEN_KEYWORD_CHARS = ("<", ">", "\r", "\n")
 #: The docs do not publish the prompt length limit, so we stay well inside any
 #: plausible one rather than discover it as a session-update rejection.
 _MAX_PROMPT_CHARS = 2000
-
-
-@dataclass(frozen=True, slots=True)
-class SttEvent:
-    kind: SttEventKind
-    item_id: str = ""
-    seq: int = 0
-    text: str = ""
-    #: commit → completed, in milliseconds. Only set on `final`.
-    latency_ms: float | None = None
-    code: str = ""
-    message: str = ""
 
 
 class WebSocketLike(Protocol):

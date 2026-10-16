@@ -3,7 +3,7 @@ BACKEND := packages/backend
 CAPTURE := packages/audio-capture
 DESKTOP := packages/desktop
 
-.PHONY: help setup test lint capture-build capture-selftest verify-openai smoke-stt eval-translation clean doctor
+.PHONY: help setup test lint backend dev bundle capture-build capture-selftest verify-openai smoke-stt eval-translation clean doctor
 
 help:
 	@grep -E '^[a-z-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-18s %s\n", $$1, $$2}'
@@ -33,6 +33,16 @@ test: ## Run backend and frontend tests
 lint: ## Lint and type-check everything
 	cd $(BACKEND) && uv run ruff check . ../../scripts && uv run ruff format --check . ../../scripts && uv run mypy
 	cd $(DESKTOP) && npm run lint --if-present && npx tsc --noEmit
+	cd $(DESKTOP)/src-tauri && cargo fmt --check && cargo clippy -- -D warnings
+
+backend: ## Run the backend on its own (prints its port and token)
+	cd $(BACKEND) && uv run --env-file ../../.env python -m jlt
+
+dev: ## Run the full desktop app (Tauri spawns the backend itself)
+	cd $(DESKTOP) && npm run tauri dev
+
+bundle: ## Build a macOS .app and .dmg
+	cd $(DESKTOP) && npm run tauri build
 
 verify-openai: ## Probe the live OpenAI API (requires OPENAI_API_KEY)
 	cd $(BACKEND) && uv run --env-file ../../.env python ../../scripts/verify_openai.py
@@ -44,5 +54,5 @@ eval-translation: ## Run the golden dataset against the live model (requires .en
 	cd $(BACKEND) && uv run --env-file ../../.env python ../../scripts/eval_translation.py
 
 clean:
-	rm -rf $(CAPTURE)/.build $(BACKEND)/.venv $(DESKTOP)/node_modules
+	rm -rf $(CAPTURE)/.build $(BACKEND)/.venv $(DESKTOP)/node_modules $(DESKTOP)/src-tauri/target
 	find . -name __pycache__ -type d -prune -exec rm -rf {} +

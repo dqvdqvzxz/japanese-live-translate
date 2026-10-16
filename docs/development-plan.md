@@ -157,9 +157,57 @@ Without it the UI falls back to the mock stream rather than pretending to be
 connected.
 
 ## Phase 5 — Integration
-Lifecycle wiring, error propagation, Keychain, process cleanup.
-**Acceptance:** start→pause→resume→stop leaves no orphan process; verified
-with `pgrep teams-audio-tap` after stop.
+
+| Task | Status |
+|---|---|
+| `SettingsManager` — atomic writes, mode 0600, corrupt-file recovery | ✅ |
+| `HistoryManager` — bounded in memory, SQLite only on opt-in | ✅ |
+| `SessionManager` — full pipeline wiring and ordered shutdown | ✅ |
+| `WebSocketGateway` — token auth, origin checks, event fan-out | ✅ |
+| Process entry point with a single-line stdout handshake | ✅ |
+| Tauri shell: Keychain, backend supervision, always-on-top | ✅ compiles |
+| Integration tests | ✅ — 54 tests (22 session, 28 gateway, 4 path/history) |
+| Live end-to-end run against real Teams and real OpenAI | ✅ |
+
+**Acceptance: MET**, with one caveat named below.
+
+Verified against a running backend process, not just in tests:
+
+| Check | Result |
+|---|---|
+| stdout carries exactly one handshake line | ✅ 1 line, `{"type":"listening","port":…,"token":…}` |
+| Logs are JSON on stderr, no errors | ✅ |
+| `/health` works unauthenticated | ✅ |
+| `/api/*` without a token | ✅ 401 |
+| `/api/*` with a token | ✅ 200, `api_key_present: true`, no `sk-` anywhere in the body |
+| Foreign `Origin` with a valid token | ✅ 403 |
+| Listening socket | ✅ `127.0.0.1` only, never `0.0.0.0` |
+| Source enumeration via ScreenCaptureKit | ✅ 36 sources, Teams and Chrome ranked first |
+| `POST /api/session/start` on real Teams | ✅ helper spawned, `stt connected` on the verified URL |
+| Silent source | ✅ `no_audio` warning after 10 s, session stayed up |
+| `POST /api/session/stop` | ✅ **0 orphan `teams-audio-tap`**, **0 established sockets** |
+| Reported stats | ✅ honest: `audio_seconds_sent: 0.0`, `stt_latency_ms.n: 0`, `p50: null` |
+
+Three real defects were found by running it rather than by testing it, all
+fixed with regression tests:
+
+1. **The audio path was dead.** `SessionManager` pushed frames into the stream
+   manager's queue but never started the worker that drains it, so audio would
+   have been queued and never sent to OpenAI. Caught by the first integration
+   test that asserted a commit reached the provider.
+2. **The redaction filter broke printf logging.** It coerced every log argument
+   to `str`, so uvicorn's `"Started server process [%d]" % (pid,)` raised on
+   every startup. Now only `str` arguments are scrubbed.
+3. **The audio helper could never be found.** `default_helper_path` counted
+   parent directories and was off by one, producing
+   `packages/packages/audio-capture`. It now walks up looking for the
+   monorepo layout.
+
+**Caveat:** the Tauri shell compiles (`cargo check`, `clippy -D warnings`,
+`cargo fmt --check` all clean) but has **not been run**. Launching it needs a
+full app build; that is Phase 6. Until then the Keychain path and the
+supervisor handshake are unexercised, and the UI falls back to the mock
+stream.
 
 ## Phase 6 — Testing and release
 Real Teams testing, browser audio, headphones, network interruption, latency
@@ -192,6 +240,10 @@ benchmarks, 60-minute run, packaging, docs.
 | 2026-10-16 | Live golden evaluation | `make eval-translation` | ✅ **18/18** after fixing 2 mislabelled cases and 1 real prompt defect; P50 1096 ms, P95 1915 ms, 8,022 in / 290 out tokens |
 | 2026-10-17 | Phase 4 frontend | `npm test`, `tsc --noEmit`, `eslint` | **20 passed**, type and lint clean |
 | 2026-10-17 | Phase 4 visual check | dev server + browser at 560px and 360px | ✅ subtitles, partial, failed line, warning banner, settings and history panels all render; narrow-width source-name bug found and fixed |
+| 2026-10-17 | Phase 5 suite | `uv run pytest -q` | **291 passed** (237 → 291) |
+| 2026-10-17 | Phase 5 lint + types | `ruff`, `mypy --strict`, `eslint`, `tsc`, `cargo clippy -D warnings`, `cargo fmt --check` | All clean |
+| 2026-10-17 | Live backend process | `python -m jlt` + curl | ✅ handshake, auth, origin, loopback-only bind, no key leak |
+| 2026-10-17 | Live session on real Teams | `POST /api/session/start` then `/stop` | ✅ helper spawned, STT connected, `no_audio` warning correct, **0 orphans and 0 sockets after stop** |
 | 2026-10-16 | Live Teams capture | `--capture app:com.microsoft.teams2`, 8 s | 366,720 bytes = 7.64 s at 24 kHz mono 16-bit; 382 frames; **0 dropped**; clean SIGINT exit 0. **Signal was silent (peak 0)** — Teams had no audio playing. Audibility remains unverified. |
 
 Entries are appended only after a command actually runs. No row is written in

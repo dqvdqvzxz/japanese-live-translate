@@ -68,3 +68,10 @@ disallow_any_generics = true
 [[tool.mypy.overrides]]
 module = ["tests.*"]
 disallow_untyped_defs = false
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "httpx2>=2.13.1",
+    "pytest-asyncio>=1.4.0",
+]

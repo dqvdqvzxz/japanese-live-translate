@@ -42,10 +42,18 @@ class RedactionFilter(logging.Filter):
         if isinstance(record.msg, str):
             record.msg = _scrub(record.msg)
         if record.args:
+            # Only strings are scrubbed, and they stay strings. Coercing every
+            # argument to str would break printf-style formatting: a library
+            # logging "%d" with an int would raise once the int became a str.
             if isinstance(record.args, dict):
-                record.args = {k: _scrub(str(v)) for k, v in record.args.items()}
+                record.args = {
+                    key: _scrub(value) if isinstance(value, str) else value
+                    for key, value in record.args.items()
+                }
             else:
-                record.args = tuple(_scrub(str(a)) for a in record.args)
+                record.args = tuple(
+                    _scrub(arg) if isinstance(arg, str) else arg for arg in record.args
+                )
         if record.exc_text:
             record.exc_text = _scrub(record.exc_text)
         return True
