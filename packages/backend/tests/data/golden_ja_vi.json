@@ -1,0 +1,163 @@
+{
+  "description": "Golden translation cases from Japanese IT project meetings. Each case asserts properties a correct Vietnamese translation must have, not one exact string: there are many correct translations of a sentence, and pinning one would make the suite reject good output. Priorities follow the brief: negation, conditions, numbers, ticket ids and technical terminology.",
+  "negation_markers_vi": [
+    "không",
+    "chưa",
+    "chẳng",
+    "đừng",
+    "khỏi"
+  ],
+  "cases": [
+    {
+      "id": "neg-01",
+      "focus": "negation",
+      "ja": "来週のリリースは延期されません。",
+      "polarity": "negative",
+      "note": "The highest-cost error in the product: dropping this negation inverts a release schedule."
+    },
+    {
+      "id": "neg-02",
+      "focus": "negation",
+      "ja": "来週のリリースは延期されます。",
+      "polarity": "affirmative",
+      "note": "Paired with neg-01. A translator that negates everything must fail here."
+    },
+    {
+      "id": "neg-03",
+      "focus": "negation",
+      "ja": "このバグはまだ再現できていません。",
+      "polarity": "negative",
+      "note": "まだ…ていません — not yet, a different negation shape from ません alone."
+    },
+    {
+      "id": "neg-04",
+      "focus": "negation",
+      "ja": "本番環境にはデプロイしないでください。",
+      "polarity": "negative",
+      "must_contain_any": [
+        "không",
+        "đừng"
+      ],
+      "note": "Prohibition. Losing it would tell someone to deploy to production."
+    },
+    {
+      "id": "neg-05",
+      "focus": "negation",
+      "ja": "テストがすべて通らなかったので、マージを見送りました。",
+      "polarity": "negative",
+      "note": "Past negative inside a causal clause."
+    },
+    {
+      "id": "cond-01",
+      "focus": "condition",
+      "ja": "レビューが終われば、今日中にマージできます。",
+      "polarity": "affirmative",
+      "must_contain_any": [
+        "nếu",
+        "khi"
+      ],
+      "note": "ば conditional. Must not become an unconditional promise."
+    },
+    {
+      "id": "cond-02",
+      "focus": "condition",
+      "ja": "対応できると思いますが、確約はできません。",
+      "polarity": "negative",
+      "note": "Hedge plus explicit non-commitment. と思います must not become a promise."
+    },
+    {
+      "id": "cond-03",
+      "focus": "condition",
+      "ja": "もし再現しなければ、チケットをクローズします。",
+      "must_contain_any": [
+        "nếu"
+      ],
+      "note": "Negative conditional: the condition is negated, the main clause is not. Polarity is deliberately not asserted here because the whole-sentence marker check cannot distinguish clause-level polarity, and a correct translation (\"Nếu không tái hiện được thì sẽ close ticket\") does contain a negation marker."
+    },
+    {
+      "id": "id-01",
+      "focus": "identifier",
+      "ja": "チケットABC-1234のステータスを確認してください。",
+      "must_contain": [
+        "ABC-1234"
+      ],
+      "note": "The exact sentence that failed the live STT smoke test; see openai-verification.md 3b."
+    },
+    {
+      "id": "id-02",
+      "focus": "identifier",
+      "ja": "PR#4821をレビューしてもらえますか。",
+      "must_contain": [
+        "4821"
+      ],
+      "note": "Pull request number must survive verbatim."
+    },
+    {
+      "id": "id-03",
+      "focus": "identifier",
+      "ja": "バージョン2.14.3で修正済みです。",
+      "must_contain": [
+        "2.14.3"
+      ],
+      "note": "Semantic version must not be reformatted or localised."
+    },
+    {
+      "id": "num-01",
+      "focus": "number",
+      "ja": "影響を受けるユーザーは約3200人です。",
+      "must_contain": [
+        "3200"
+      ],
+      "note": "Digits must stay digits; 3.200 or 3,200 would also be acceptable to a human but we assert the bare form.",
+      "no_japanese_script": true
+    },
+    {
+      "id": "num-02",
+      "focus": "number",
+      "ja": "レスポンスタイムが250ミリ秒から1.8秒に悪化しました。",
+      "must_contain": [
+        "250",
+        "1.8"
+      ],
+      "note": "Two quantities with different units. The first live run returned '250ミリ秒' and '1.8秒' — digits preserved but units left in Japanese, which is unreadable for the target user. Hence no_japanese_script.",
+      "no_japanese_script": true
+    },
+    {
+      "id": "num-03",
+      "focus": "number",
+      "ja": "11月14日の15時からメンテナンスを実施します。",
+      "must_contain": [
+        "14",
+        "15"
+      ],
+      "note": "Date and time. The first live run returned '11月14日', preserving the numbers but not rendering the date in Vietnamese. The calendar and timezone must not change; only the script and format may.",
+      "no_japanese_script": true
+    },
+    {
+      "id": "term-01",
+      "focus": "terminology",
+      "ja": "ステージング環境でロールバックを試しましたが、失敗しました。",
+      "note": "Loanword technical terms plus a failure outcome. Polarity is not asserted: 失敗しました is affirmative in form, and the correct Vietnamese \"thất bại\" carries no negation marker. Labelling lexical failure as negation was a dataset bug caught by the first live evaluation run."
+    },
+    {
+      "id": "term-02",
+      "focus": "terminology",
+      "ja": "このエンドポイントはレートリミットに引っかかっています。",
+      "note": "Rate limiting. Vietnamese engineers normally keep the English term."
+    },
+    {
+      "id": "term-03",
+      "focus": "terminology",
+      "ja": "デプロイのパイプラインがタイムアウトしました。",
+      "note": "Three loanwords in one short sentence."
+    },
+    {
+      "id": "frag-01",
+      "focus": "fragment",
+      "ja": "それで、その件なんですけど",
+      "note": "An unterminated fragment, which the live pipeline will produce. Must be translated as a fragment, not completed or padded."
+    }
+  ],
+  "polarity_note": "`polarity` describes the grammatical polarity of the whole sentence and is asserted with a Vietnamese negation-marker list. That check cannot tell a negated subordinate clause from a negated main clause, so it is only set on sentences whose polarity is unambiguous throughout. Lexical failure words such as 失敗 are not negation and must not be labelled as such.",
+  "japanese_script_ranges": "Hiragana, katakana and CJK ideographs must not appear in the Vietnamese output."
+}

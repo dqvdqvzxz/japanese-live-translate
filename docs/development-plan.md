@@ -105,10 +105,27 @@ reconstruction is therefore a Phase 3 responsibility, not something to assume
 the STT layer provides.
 
 ## Phase 3 — Translation
-SegmentManager merge/completeness/dedupe, bounded TranslationQueue with
-reorder buffer, Responses-based provider with glossary and context, golden
-dataset of Japanese IT meeting sentences.
-**Acceptance:** golden tests pass; ordering and timeout tests pass.
+
+| Task | Status |
+|---|---|
+| `SegmentManager` — merge, completeness, flush deadlines | ✅ |
+| Deduplication by transcript `seq` (never by content) | ✅ |
+| Identifier reconstruction from the glossary | ✅ |
+| `OpenAITranslationProvider` — Responses, retries, timeouts | ✅ |
+| Prompt: negation, identifiers, units, conditionals, glossary, context | ✅ |
+| `TranslationQueue` — bounded queue, bounded concurrency | ✅ |
+| Reorder buffer with a bounded stall release | ✅ |
+| Golden dataset, 18 cases across the brief's five priorities | ✅ |
+| Offline tests | ✅ — 121 tests |
+| Live golden evaluation | ✅ — **18/18**, P50 1096 ms |
+
+**Acceptance: MET.** `make eval-translation` passes every golden case against
+the live model. Measured translation-stage latency is recorded in
+`docs/benchmarks.md`; it is a component measurement, not the end-to-end number.
+
+The first evaluation run found two mislabelled golden cases and one real output
+defect (Japanese units surviving into Vietnamese). All three are documented in
+`docs/benchmarks.md`; the labels were corrected and the prompt was tightened.
 
 ## Phase 4 — Desktop UI
 Subtitle view, controls, settings, history, always-on-top, status.
@@ -146,6 +163,9 @@ benchmarks, 60-minute run, packaging, docs.
 | 2026-10-16 | Live OpenAI verification | `make verify-openai` | ✅ both models available; WS URL resolved to `?intent=transcription` (`session.created`); Responses round-trip correct, negation and ticket id preserved; `reasoning_tokens: 0` confirms `effort: none` |
 | 2026-10-16 | Live STT smoke test | `scripts/smoke_stt.py` | ✅ 2/2 finals, seqs `[1, 2]`, 0 duplicates; first partial 949–1057 ms; commit→final 682–685 ms (synthetic speech, n=2) |
 | 2026-10-16 | Keyword-hint efficacy | ad-hoc A/B on the same sentence | ⚠️ partial: `千二百三十四` → `1234`, letters stayed `A B C`; see openai-verification.md §3b |
+| 2026-10-16 | Phase 3 suite | `uv run pytest -q` | **237 passed** (116 → 237) |
+| 2026-10-16 | Phase 3 lint + types | `ruff`, `ruff format`, `mypy --strict` | All clean, 21 source files |
+| 2026-10-16 | Live golden evaluation | `make eval-translation` | ✅ **18/18** after fixing 2 mislabelled cases and 1 real prompt defect; P50 1096 ms, P95 1915 ms, 8,022 in / 290 out tokens |
 | 2026-10-16 | Live Teams capture | `--capture app:com.microsoft.teams2`, 8 s | 366,720 bytes = 7.64 s at 24 kHz mono 16-bit; 382 frames; **0 dropped**; clean SIGINT exit 0. **Signal was silent (peak 0)** — Teams had no audio playing. Audibility remains unverified. |
 
 Entries are appended only after a command actually runs. No row is written in

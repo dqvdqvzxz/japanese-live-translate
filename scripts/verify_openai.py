@@ -9,7 +9,7 @@ It settles the one question the published docs leave open: which WebSocket URL
 accepts a `gpt-live-transcribe` transcription session
 (see docs/openai-verification.md §2).
 
-    OPENAI_API_KEY=sk-... python3 scripts/verify_openai.py
+    make verify-openai        # or: uv run python ../../scripts/verify_openai.py
 
 Checks:
   1. the API key authenticates;
@@ -23,9 +23,6 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import sys
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "packages", "backend", "src"))
 
 from jlt.config import (
     REALTIME_URL_CANDIDATES,

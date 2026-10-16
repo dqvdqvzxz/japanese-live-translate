@@ -10,19 +10,16 @@ base64 append, commit, delta accumulation, final normalization — against the
 real service. It is not a unit test and is not run by `make test`; it needs a
 key and it costs money (a few seconds of audio at $0.017/minute).
 
-    OPENAI_API_KEY=sk-... python3 scripts/smoke_stt.py
+    make smoke-stt
 """
 
 from __future__ import annotations
 
 import asyncio
 import subprocess
-import sys
 import tempfile
 import time
 from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "packages/backend/src"))
 
 from jlt.config import FRAME_BYTES, SAMPLE_RATE_HZ, SttSettings
 from jlt.secrets import load_api_key

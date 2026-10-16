@@ -3,7 +3,7 @@ BACKEND := packages/backend
 CAPTURE := packages/audio-capture
 DESKTOP := packages/desktop
 
-.PHONY: help setup test lint capture-build capture-selftest verify-openai clean doctor
+.PHONY: help setup test lint capture-build capture-selftest verify-openai smoke-stt eval-translation clean doctor
 
 help:
 	@grep -E '^[a-z-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-18s %s\n", $$1, $$2}'
@@ -36,6 +36,12 @@ lint: ## Lint and type-check everything
 
 verify-openai: ## Probe the live OpenAI API (requires OPENAI_API_KEY)
 	cd $(BACKEND) && uv run --env-file ../../.env python ../../scripts/verify_openai.py
+
+smoke-stt: ## Live STT round-trip with synthesised Japanese (requires .env)
+	cd $(BACKEND) && uv run --env-file ../../.env python ../../scripts/smoke_stt.py
+
+eval-translation: ## Run the golden dataset against the live model (requires .env)
+	cd $(BACKEND) && uv run --env-file ../../.env python ../../scripts/eval_translation.py
 
 clean:
 	rm -rf $(CAPTURE)/.build $(BACKEND)/.venv $(DESKTOP)/node_modules
