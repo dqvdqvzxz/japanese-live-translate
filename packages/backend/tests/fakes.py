@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass, field
 
@@ -75,3 +76,100 @@ class FakeTranslationProvider:
 async def frames_from(chunks: list[bytes]) -> AsyncIterator[bytes]:
     for chunk in chunks:
         yield chunk
+
+
+class FakeWebSocket:
+    """A scripted WebSocket.
+
+    `inbox` holds frames the server will send, in order. A `Disconnect` marker
+    raises instead, which is how connection loss is simulated. Everything the
+    client sends is recorded in `sent` as parsed JSON.
+    """
+
+    class Disconnect(Exception):
+        pass
+
+    def __init__(self, inbox: list[object] | None = None) -> None:
+        self.inbox: list[object] = list(inbox or [])
+        self.sent: list[dict] = []
+        self.closed = False
+        self._idle = asyncio.Event()
+
+    async def send(self, message: str) -> None:
+        if self.closed:
+            raise ConnectionError("socket closed")
+        self.sent.append(json.loads(message))
+
+    async def recv(self) -> str:
+        while True:
+            if not self.inbox:
+                # Nothing scripted left. Idle like a quiet connection would,
+                # rather than reporting a close the test did not ask for — but
+                # keep polling, because a test may append frames mid-scenario.
+                await asyncio.sleep(0.001)
+                continue
+            item = self.inbox.pop(0)
+            if isinstance(item, type) and issubclass(item, BaseException):
+                raise item("scripted disconnect")
+            if isinstance(item, BaseException):
+                raise item
+            return json.dumps(item)
+
+    async def close(self) -> None:
+        self.closed = True
+
+    # -- helpers for building scripted server frames ------------------------
+
+    @staticmethod
+    def delta(item_id: str, text: str) -> dict:
+        return {
+            "type": "conversation.item.input_audio_transcription.delta",
+            "item_id": item_id,
+            "content_index": 0,
+            "delta": text,
+        }
+
+    @staticmethod
+    def completed(item_id: str, transcript: str) -> dict:
+        return {
+            "type": "conversation.item.input_audio_transcription.completed",
+            "item_id": item_id,
+            "content_index": 0,
+            "transcript": transcript,
+        }
+
+    @staticmethod
+    def error(code: str, message: str) -> dict:
+        return {"type": "error", "error": {"code": code, "message": message}}
+
+
+def scripted_connector(*sockets: FakeWebSocket):
+    """A connector that hands out the given sockets in order.
+
+    Records every URL it was asked for, so URL-fallback behaviour is testable.
+    """
+    queue = list(sockets)
+    calls: list[str] = []
+
+    async def connect(url: str, headers: dict[str, str]):
+        calls.append(url)
+        if not queue:
+            raise ConnectionError("no more scripted sockets")
+        socket = queue.pop(0)
+        if isinstance(socket, BaseException):
+            raise socket
+        return socket
+
+    connect.calls = calls  # type: ignore[attr-defined]
+    return connect
+
+
+def failing_connector(error: Exception):
+    calls: list[str] = []
+
+    async def connect(url: str, headers: dict[str, str]):
+        calls.append(url)
+        raise error
+
+    connect.calls = calls  # type: ignore[attr-defined]
+    return connect

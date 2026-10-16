@@ -75,9 +75,30 @@ Non-zero peak amplitude plus an audible WAV closes this item. Until then it
 stays open, and Phase 1 is not called complete.
 
 ## Phase 2 — Japanese STT
-Realtime WebSocket provider, delta/final normalization, dedupe, ordering,
-reconnect with backoff, unit tests against a fake WebSocket.
-**Acceptance:** all STT unit tests green; live smoke test transcribes Japanese.
+
+| Task | Status |
+|---|---|
+| `OpenAIRealtimeSTTProvider` — session.update, append, commit | ✅ |
+| URL-candidate fallback + sticky resolved URL | ✅ |
+| Delta accumulation and final normalization | ✅ |
+| Duplicate suppression (repeat completion, late delta, re-delivered turn) | ✅ |
+| Ordering by commit-assigned `seq`, not arrival | ✅ |
+| Reconnect with exponential backoff + full jitter, config re-sent | ✅ |
+| `TranscriptManager` — publishes `transcript.partial` / `transcript.final` | ✅ |
+| Measured STT latency (commit → completed) | ✅ |
+| Unit tests against a fake WebSocket | ✅ — 41 tests |
+| Live smoke test against the real API | 🟡 pending — needs `OPENAI_API_KEY` |
+
+**Acceptance: PARTIALLY MET.** All offline behaviour is implemented and tested
+against frames shaped exactly as the official docs specify. The live smoke test
+and the WebSocket-URL resolution still need a real key:
+
+```
+export OPENAI_API_KEY='sk-...' && make verify-openai
+```
+
+Until that runs, the provider will try each candidate URL at connect time and
+report an actionable error if none is accepted.
 
 ## Phase 3 — Translation
 SegmentManager merge/completeness/dedupe, bounded TranslationQueue with
@@ -116,6 +137,8 @@ benchmarks, 60-minute run, packaging, docs.
 | 2026-10-16 | Source enumeration | `teams-audio-tap --list-sources` | exit 0; Teams (`com.microsoft.teams2`, pid 44832) and Chrome detected and ranked recommended |
 | 2026-10-16 | Permission denial path | same, before permission was granted | exit 2 + `permission_denied` control message, as specified |
 | 2026-10-16 | Argument validation | `--rate 48000` | rejected, exit 64 |
+| 2026-10-16 | Phase 2 STT suite | `uv run pytest -q` | **116 passed** (75 → 116; +29 provider, +12 transcript manager) |
+| 2026-10-16 | Phase 2 lint + types | `ruff check`, `ruff format --check`, `mypy --strict` | All clean, 17 source files |
 | 2026-10-16 | Live Teams capture | `--capture app:com.microsoft.teams2`, 8 s | 366,720 bytes = 7.64 s at 24 kHz mono 16-bit; 382 frames; **0 dropped**; clean SIGINT exit 0. **Signal was silent (peak 0)** — Teams had no audio playing. Audibility remains unverified. |
 
 Entries are appended only after a command actually runs. No row is written in
