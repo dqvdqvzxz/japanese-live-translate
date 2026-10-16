@@ -25,3 +25,6 @@ packages/desktop/src-tauri/target/
 
 # macOS
 .DS_Store
+
+# Vite build output
+packages/desktop/dist/

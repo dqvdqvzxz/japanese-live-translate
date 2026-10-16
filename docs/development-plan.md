@@ -128,9 +128,33 @@ defect (Japanese units surviving into Vietnamese). All three are documented in
 `docs/benchmarks.md`; the labels were corrected and the prompt was tightened.
 
 ## Phase 4 — Desktop UI
-Subtitle view, controls, settings, history, always-on-top, status.
-**Acceptance:** `vitest` green, `tsc --noEmit` clean, UI renders against a
-mock event stream.
+
+| Task | Status |
+|---|---|
+| Subtitle view: Japanese above, Vietnamese beneath its own source | ✅ |
+| Live partial rendered separately and replaced wholesale | ✅ |
+| Start / Stop / Pause / Resume | ✅ |
+| Always-on-top toggle (Tauri command wired in Phase 5) | ✅ |
+| Settings: theme, font size, partials, STT delay, privacy | ✅ |
+| Session history with measured statistics | ✅ |
+| Connection and capture status, always visible, with a level meter | ✅ |
+| Dark mode following the system, overridable | ✅ |
+| Mock event stream for development without a backend | ✅ |
+| Subtitle state reducer tests | ✅ — 16 tests |
+
+**Acceptance: MET.** `npm test` green (20 tests), `tsc --noEmit` clean,
+`eslint` clean, and the UI was rendered against the mock stream and inspected
+at 560px and 360px.
+
+Found and fixed while looking at it: at narrow widths the source `<select>`
+collapsed to a bare chevron, hiding which application's audio was being sent
+to OpenAI. That is a stated privacy requirement (`docs/security.md` §7), not a
+cosmetic issue, so the control bar now wraps and gives the source selector its
+own row below 460px.
+
+Note: the Tauri shell itself (Rust, Keychain, backend supervision) is Phase 5.
+Without it the UI falls back to the mock stream rather than pretending to be
+connected.
 
 ## Phase 5 — Integration
 Lifecycle wiring, error propagation, Keychain, process cleanup.
@@ -166,6 +190,8 @@ benchmarks, 60-minute run, packaging, docs.
 | 2026-10-16 | Phase 3 suite | `uv run pytest -q` | **237 passed** (116 → 237) |
 | 2026-10-16 | Phase 3 lint + types | `ruff`, `ruff format`, `mypy --strict` | All clean, 21 source files |
 | 2026-10-16 | Live golden evaluation | `make eval-translation` | ✅ **18/18** after fixing 2 mislabelled cases and 1 real prompt defect; P50 1096 ms, P95 1915 ms, 8,022 in / 290 out tokens |
+| 2026-10-17 | Phase 4 frontend | `npm test`, `tsc --noEmit`, `eslint` | **20 passed**, type and lint clean |
+| 2026-10-17 | Phase 4 visual check | dev server + browser at 560px and 360px | ✅ subtitles, partial, failed line, warning banner, settings and history panels all render; narrow-width source-name bug found and fixed |
 | 2026-10-16 | Live Teams capture | `--capture app:com.microsoft.teams2`, 8 s | 366,720 bytes = 7.64 s at 24 kHz mono 16-bit; 382 frames; **0 dropped**; clean SIGINT exit 0. **Signal was silent (peak 0)** — Teams had no audio playing. Audibility remains unverified. |
 
 Entries are appended only after a command actually runs. No row is written in
