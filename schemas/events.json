@@ -1,0 +1,219 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jlt.local/schemas/events.json",
+  "title": "Japanese Live Translator — backend to UI event envelope",
+  "description": "Single source of truth for the local WebSocket protocol. The Python models in packages/backend/src/jlt/models.py and the TypeScript types in packages/desktop/src/types/events.ts mirror this file; tests/test_schema_sync.py asserts the Python side stays in sync.",
+  "oneOf": [
+    { "$ref": "#/$defs/TranscriptPartialEvent" },
+    { "$ref": "#/$defs/TranscriptFinalEvent" },
+    { "$ref": "#/$defs/SegmentCreatedEvent" },
+    { "$ref": "#/$defs/SegmentTranslatedEvent" },
+    { "$ref": "#/$defs/SegmentFailedEvent" },
+    { "$ref": "#/$defs/StatusEvent" },
+    { "$ref": "#/$defs/SessionStartedEvent" },
+    { "$ref": "#/$defs/SessionStoppedEvent" },
+    { "$ref": "#/$defs/ErrorEvent" }
+  ],
+  "$defs": {
+    "Base": {
+      "type": "object",
+      "required": ["type", "ts", "session_id"],
+      "properties": {
+        "type": { "type": "string" },
+        "ts": { "type": "number", "description": "Unix seconds, backend wall clock" },
+        "session_id": { "type": "string" }
+      }
+    },
+    "CaptureState": {
+      "enum": ["idle", "starting", "running", "paused", "stopping", "stopped", "error"]
+    },
+    "SttState": {
+      "enum": ["disconnected", "connecting", "connected", "reconnecting", "error"]
+    },
+    "TranslationState": { "enum": ["ready", "degraded", "error"] },
+    "SegmentState": {
+      "enum": ["partial", "final", "translating", "translated", "failed"]
+    },
+    "Usage": {
+      "type": "object",
+      "properties": {
+        "input_tokens": { "type": "integer", "minimum": 0 },
+        "output_tokens": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "LatencySummary": {
+      "type": "object",
+      "description": "Measured only. Absent when no samples exist.",
+      "required": ["n"],
+      "properties": {
+        "p50": { "type": ["number", "null"] },
+        "p95": { "type": ["number", "null"] },
+        "n": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "AudioSource": {
+      "type": "object",
+      "required": ["id", "kind", "name"],
+      "properties": {
+        "id": { "type": "string", "examples": ["app:com.microsoft.teams2"] },
+        "kind": { "enum": ["application", "display"] },
+        "name": { "type": "string" },
+        "bundle_id": { "type": ["string", "null"] },
+        "pid": { "type": ["integer", "null"] },
+        "is_recommended": { "type": "boolean", "default": false }
+      },
+      "additionalProperties": false
+    },
+    "SessionStats": {
+      "type": "object",
+      "required": ["session_id", "started_at", "duration_s"],
+      "properties": {
+        "session_id": { "type": "string" },
+        "started_at": { "type": "number" },
+        "duration_s": { "type": "number" },
+        "audio_seconds_sent": { "type": "number" },
+        "segments_final": { "type": "integer" },
+        "segments_translated": { "type": "integer" },
+        "segments_failed": { "type": "integer" },
+        "reconnects": { "type": "integer" },
+        "stt_latency_ms": { "$ref": "#/$defs/LatencySummary" },
+        "translation_latency_ms": { "$ref": "#/$defs/LatencySummary" },
+        "e2e_latency_ms": { "$ref": "#/$defs/LatencySummary" },
+        "usage": { "$ref": "#/$defs/Usage" },
+        "estimated_cost_usd": { "type": ["number", "null"] }
+      },
+      "additionalProperties": false
+    },
+
+    "TranscriptPartialEvent": {
+      "allOf": [{ "$ref": "#/$defs/Base" }],
+      "type": "object",
+      "required": ["type", "ts", "session_id", "item_id", "seq", "text"],
+      "properties": {
+        "type": { "const": "transcript.partial" },
+        "ts": { "type": "number" },
+        "session_id": { "type": "string" },
+        "item_id": { "type": "string" },
+        "seq": { "type": "integer", "description": "Locally assigned monotonic order key" },
+        "text": { "type": "string", "description": "Full accumulated text for the turn, not the raw delta" }
+      },
+      "additionalProperties": false
+    },
+    "TranscriptFinalEvent": {
+      "type": "object",
+      "required": ["type", "ts", "session_id", "item_id", "seq", "text"],
+      "properties": {
+        "type": { "const": "transcript.final" },
+        "ts": { "type": "number" },
+        "session_id": { "type": "string" },
+        "item_id": { "type": "string" },
+        "seq": { "type": "integer" },
+        "text": { "type": "string" },
+        "stt_latency_ms": { "type": ["number", "null"] }
+      },
+      "additionalProperties": false
+    },
+    "SegmentCreatedEvent": {
+      "type": "object",
+      "required": ["type", "ts", "session_id", "segment_id", "seq", "source_text", "state"],
+      "properties": {
+        "type": { "const": "segment.created" },
+        "ts": { "type": "number" },
+        "session_id": { "type": "string" },
+        "segment_id": { "type": "string" },
+        "seq": { "type": "integer" },
+        "source_text": { "type": "string" },
+        "source_seqs": { "type": "array", "items": { "type": "integer" } },
+        "state": { "$ref": "#/$defs/SegmentState" }
+      },
+      "additionalProperties": false
+    },
+    "SegmentTranslatedEvent": {
+      "type": "object",
+      "required": ["type", "ts", "session_id", "segment_id", "seq", "source_text", "target_text", "state"],
+      "properties": {
+        "type": { "const": "segment.translated" },
+        "ts": { "type": "number" },
+        "session_id": { "type": "string" },
+        "segment_id": { "type": "string" },
+        "seq": { "type": "integer" },
+        "source_text": { "type": "string" },
+        "target_text": { "type": "string" },
+        "state": { "$ref": "#/$defs/SegmentState" },
+        "translation_latency_ms": { "type": ["number", "null"] },
+        "e2e_latency_ms": { "type": ["number", "null"] },
+        "usage": { "$ref": "#/$defs/Usage" }
+      },
+      "additionalProperties": false
+    },
+    "SegmentFailedEvent": {
+      "type": "object",
+      "required": ["type", "ts", "session_id", "segment_id", "seq", "source_text", "state", "reason"],
+      "properties": {
+        "type": { "const": "segment.failed" },
+        "ts": { "type": "number" },
+        "session_id": { "type": "string" },
+        "segment_id": { "type": "string" },
+        "seq": { "type": "integer" },
+        "source_text": { "type": "string" },
+        "state": { "$ref": "#/$defs/SegmentState" },
+        "reason": { "enum": ["timeout", "api_error", "cancelled", "queue_full"] }
+      },
+      "additionalProperties": false
+    },
+    "StatusEvent": {
+      "type": "object",
+      "required": ["type", "ts", "session_id", "capture", "stt", "translation"],
+      "properties": {
+        "type": { "const": "status" },
+        "ts": { "type": "number" },
+        "session_id": { "type": "string" },
+        "capture": { "$ref": "#/$defs/CaptureState" },
+        "stt": { "$ref": "#/$defs/SttState" },
+        "translation": { "$ref": "#/$defs/TranslationState" },
+        "audio_level_dbfs": { "type": ["number", "null"] },
+        "queue_depth": { "type": "integer" },
+        "detail": { "type": ["string", "null"] }
+      },
+      "additionalProperties": false
+    },
+    "SessionStartedEvent": {
+      "type": "object",
+      "required": ["type", "ts", "session_id", "source"],
+      "properties": {
+        "type": { "const": "session.started" },
+        "ts": { "type": "number" },
+        "session_id": { "type": "string" },
+        "source": { "$ref": "#/$defs/AudioSource" }
+      },
+      "additionalProperties": false
+    },
+    "SessionStoppedEvent": {
+      "type": "object",
+      "required": ["type", "ts", "session_id", "stats"],
+      "properties": {
+        "type": { "const": "session.stopped" },
+        "ts": { "type": "number" },
+        "session_id": { "type": "string" },
+        "stats": { "$ref": "#/$defs/SessionStats" }
+      },
+      "additionalProperties": false
+    },
+    "ErrorEvent": {
+      "type": "object",
+      "required": ["type", "ts", "session_id", "severity", "code", "message"],
+      "properties": {
+        "type": { "const": "error" },
+        "ts": { "type": "number" },
+        "session_id": { "type": "string" },
+        "severity": { "enum": ["warning", "fatal"] },
+        "code": { "type": "string" },
+        "message": { "type": "string", "description": "Human readable. MUST NOT contain meeting content." },
+        "retryable": { "type": "boolean", "default": false }
+      },
+      "additionalProperties": false
+    }
+  }
+}

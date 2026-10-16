@@ -1,0 +1,27 @@
+# Swift
+packages/audio-capture/.build/
+*.xcodeproj
+.swiftpm/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+
+# Node / Tauri
+node_modules/
+dist/
+packages/desktop/src-tauri/target/
+
+# Local config and anything that could hold a secret
+.env
+.env.local
+*.pem
+*.p12
+
+# macOS
+.DS_Store

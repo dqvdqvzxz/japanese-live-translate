@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:developers.openai.com)",
+      "WebSearch",
+      "Read(//opt/homebrew/**)",
+      "Read(//Users/meobeo/.cargo/**)",
+      "Bash(xcrun --show-sdk-path)",
+      "Bash(xcrun --show-sdk-version)",
+      "Read(//Library/Developer/CommandLineTools/SDKs/MacOSX15.5.sdk/System/Library/Frameworks/**)"
+    ]
+  }
+}
