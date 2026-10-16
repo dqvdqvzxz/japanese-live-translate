@@ -35,7 +35,7 @@ lint: ## Lint and type-check everything
 	cd $(DESKTOP) && npm run lint --if-present && npx tsc --noEmit
 
 verify-openai: ## Probe the live OpenAI API (requires OPENAI_API_KEY)
-	cd $(BACKEND) && uv run python ../../scripts/verify_openai.py
+	cd $(BACKEND) && uv run --env-file ../../.env python ../../scripts/verify_openai.py
 
 clean:
 	rm -rf $(CAPTURE)/.build $(BACKEND)/.venv $(DESKTOP)/node_modules

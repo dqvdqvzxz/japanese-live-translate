@@ -64,14 +64,88 @@ def test_model_fields_match_schema_properties(schema: dict, model: type):
     )
 
 
-@pytest.mark.parametrize("model", EVENT_MODELS, ids=lambda m: m.__name__)
-def test_required_schema_fields_have_no_default(schema: dict, model: type):
-    definition = schema["$defs"][model.__name__]
-    for name in definition.get("required", []):
-        if name in ("type", "ts"):
-            continue  # discriminator and timestamp are always populated
-        field = model.model_fields[name]
-        assert field.is_required(), f"{model.__name__}.{name} is required by the schema"
+#: One realistic instance per event type. These are what actually goes over the
+#: wire, so validating them against the schema tests the real contract rather
+#: than a proxy for it.
+SAMPLES: list[models.BaseModel] = [
+    models.TranscriptPartialEvent(
+        session_id="s_1", item_id="item_003", seq=42, text="\u6765\u9031\u306e"
+    ),
+    models.TranscriptFinalEvent(
+        session_id="s_1",
+        item_id="item_003",
+        seq=42,
+        text="\u6765\u9031\u306e",
+        stt_latency_ms=940.0,
+    ),
+    models.SegmentCreatedEvent(
+        session_id="s_1", segment_id="seg_17", seq=42, source_text="x", source_seqs=[42]
+    ),
+    models.SegmentTranslatedEvent(
+        session_id="s_1",
+        segment_id="seg_17",
+        seq=42,
+        source_text="x",
+        target_text="y",
+        translation_latency_ms=1510.0,
+        e2e_latency_ms=2450.0,
+        usage=models.Usage(input_tokens=243, output_tokens=38),
+    ),
+    models.SegmentFailedEvent(
+        session_id="s_1", segment_id="seg_17", seq=42, source_text="x", reason="timeout"
+    ),
+    models.StatusEvent(
+        session_id="s_1",
+        capture="running",
+        stt="connected",
+        translation="ready",
+        audio_level_dbfs=-31.2,
+        queue_depth=1,
+    ),
+    models.SessionStartedEvent(
+        session_id="s_1",
+        source=models.AudioSource(
+            id="app:com.microsoft.teams2", kind="application", name="Microsoft Teams"
+        ),
+    ),
+    models.SessionStoppedEvent(
+        session_id="s_1",
+        stats=models.SessionStats(session_id="s_1", started_at=1.0, duration_s=60.0),
+    ),
+    models.ErrorEvent(
+        session_id="s_1",
+        severity="warning",
+        code="stt_reconnecting",
+        message="Reconnecting.",
+        retryable=True,
+    ),
+]
+
+
+def test_every_event_model_has_a_sample():
+    assert {type(s) for s in SAMPLES} == set(EVENT_MODELS)
+
+
+@pytest.mark.parametrize("sample", SAMPLES, ids=lambda s: type(s).__name__)
+def test_serialized_events_validate_against_the_schema(schema: dict, sample):
+    """The real contract: what we actually send must satisfy the schema.
+
+    This catches a required field that is missing from the payload, an extra
+    field the UI would not expect, and any type mismatch — none of which a
+    field-name comparison alone would notice.
+    """
+    jsonschema = pytest.importorskip("jsonschema")
+    payload = json.loads(sample.model_dump_json())
+    definition = {**schema["$defs"][type(sample).__name__], "$defs": schema["$defs"]}
+    jsonschema.validate(payload, definition)
+
+
+@pytest.mark.parametrize("sample", SAMPLES, ids=lambda s: type(s).__name__)
+def test_required_schema_fields_are_always_serialized(schema: dict, sample):
+    definition = schema["$defs"][type(sample).__name__]
+    payload = json.loads(sample.model_dump_json())
+    missing = set(definition.get("required", [])) - set(payload)
+    assert not missing, f"{type(sample).__name__} omits required field(s) {missing}"
 
 
 def test_typescript_types_declare_every_event():

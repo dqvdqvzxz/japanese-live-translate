@@ -80,9 +80,7 @@ class EventDispatcher:
         finally:
             self._subscribers.discard(subscription)
             if subscription.dropped:
-                log.warning(
-                    "subscriber dropped events", extra={"dropped": subscription.dropped}
-                )
+                log.warning("subscriber dropped events", extra={"dropped": subscription.dropped})
 
     @property
     def subscriber_count(self) -> int:

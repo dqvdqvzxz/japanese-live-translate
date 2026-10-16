@@ -26,4 +26,4 @@ def frames() -> Iterator[None]:
     yield None
 
 
-__all__ = ["pcm_frame", "SILENCE", "SPEECH", "QUIET", "SAMPLE_RATE_HZ", "FRAME_BYTES"]
+__all__ = ["FRAME_BYTES", "QUIET", "SAMPLE_RATE_HZ", "SILENCE", "SPEECH", "pcm_frame"]

@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import pytest
 
-from jlt.config import FRAME_MS, VadSettings
 from jlt.audio.vad import ActionKind, VadSegmenter, frame_dbfs
+from jlt.config import FRAME_MS, VadSettings
 
 from .conftest import QUIET, SILENCE, SPEECH, pcm_frame
 

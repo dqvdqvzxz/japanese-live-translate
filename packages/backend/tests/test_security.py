@@ -27,8 +27,13 @@ def test_token_comparison_rejects_wrong_and_missing_tokens():
 
 def test_redaction_filter_scrubs_keys_from_messages():
     record = logging.LogRecord(
-        "t", logging.INFO, __file__, 1,
-        "connecting with sk-ABCDEFGHIJKLMNOPQRSTUVWXYZ012345", None, None,
+        "t",
+        logging.INFO,
+        __file__,
+        1,
+        "connecting with sk-ABCDEFGHIJKLMNOPQRSTUVWXYZ012345",
+        None,
+        None,
     )
     jlt_logging.RedactionFilter().filter(record)
     assert "sk-ABCDEFGHIJ" not in record.getMessage()

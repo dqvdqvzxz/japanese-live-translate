@@ -144,9 +144,7 @@ class AudioCaptureService:
             # The key is not in this child's environment; it has no need for it.
             env={k: v for k, v in os.environ.items() if k != "OPENAI_API_KEY"},
         )
-        self._control_task = asyncio.create_task(
-            self._read_control(), name="audio-control"
-        )
+        self._control_task = asyncio.create_task(self._read_control(), name="audio-control")
 
         done, _ = await asyncio.wait(
             [
@@ -164,9 +162,7 @@ class AudioCaptureService:
             raise self._start_error
         if not self._started.is_set():
             await self._terminate()
-            raise CaptureError(
-                "start_timeout", "The audio helper did not start within 15 seconds."
-            )
+            raise CaptureError("start_timeout", "The audio helper did not start within 15 seconds.")
 
         assert self._source is not None
         log.info("capture started", extra={"source_id": source_id})
@@ -202,7 +198,7 @@ class AudioCaptureService:
             try:
                 process.send_signal(signal.SIGINT)
                 await asyncio.wait_for(process.wait(), timeout=_GRACEFUL_STOP_TIMEOUT_S)
-            except (asyncio.TimeoutError, ProcessLookupError):
+            except (TimeoutError, ProcessLookupError):
                 log.warning("audio helper did not stop gracefully; killing")
                 with _suppress_process_errors():
                     process.kill()
@@ -271,9 +267,7 @@ class AudioCaptureService:
             self._level_dbfs = float(message.get("rms_dbfs", -120.0))
         elif kind == "warning":
             self._warnings.append(message)
-            log.warning(
-                "audio helper warning", extra={"code": message.get("code")}
-            )
+            log.warning("audio helper warning", extra={"code": message.get("code")})
         elif kind == "error":
             code = str(message.get("code", "capture_error"))
             text = str(message.get("message", "Audio capture failed."))

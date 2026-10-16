@@ -12,9 +12,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 
-CaptureState = Literal[
-    "idle", "starting", "running", "paused", "stopping", "stopped", "error"
-]
+CaptureState = Literal["idle", "starting", "running", "paused", "stopping", "stopped", "error"]
 SttState = Literal["disconnected", "connecting", "connected", "reconnecting", "error"]
 TranslationState = Literal["ready", "degraded", "error"]
 SegmentState = Literal["partial", "final", "translating", "translated", "failed"]
