@@ -55,14 +55,20 @@ could not be executed here are marked pending, not assumed.
 | Enumerates sources, finds Teams | ✅ — `app:com.microsoft.teams2` detected, ranked as recommended |
 | Opens a capture stream on Teams and emits aligned 24 kHz mono PCM16 | ✅ — 7.64 s captured, 382 frames, 0 dropped |
 | Graceful SIGINT stop, clean exit, no orphan process | ✅ |
-| Carries an **audible** signal (not just a correctly-shaped silent stream) | ⛔ manual — see below |
+| Carries an **audible** signal through the system-audio (display) filter | ✅ peak 7517, −32.7 dBFS |
+| Carries an audible signal through the **per-application** filter | ⛔ manual — needs Teams actually playing sound |
 | 30-minute continuous capture | ⛔ manual |
 
-**Acceptance: PARTIALLY MET.** Everything that can be verified without a live
-meeting is verified. The outstanding item is specific and important: the test
-capture above was byte-perfect but **entirely silent** (peak sample 0, −120
-dBFS) because Teams was not playing any audio at the time. A correctly-shaped
-stream of zeros proves the format and framing path, not the audio tap itself.
+**Acceptance: PARTIALLY MET.** The tap demonstrably captures real audio: a
+system-audio capture taken while a sound played returned peak 7517 and
+−32.7 dBFS, proving the whole ScreenCaptureKit → AVAudioConverter → PCM16
+path works, not just its shape.
+
+What remains unproven is narrower but still real: that path was exercised
+through the **display** content filter. The per-application filter — the one
+used for Teams — differs only in how `SCContentFilter` is constructed, but it
+has still only ever been run against a silent Teams, so it has not been shown
+to carry audio. It is not claimed to.
 
 To close it, play audio through Teams (or a browser tab) and run:
 
@@ -244,6 +250,8 @@ benchmarks, 60-minute run, packaging, docs.
 | 2026-10-17 | Phase 5 lint + types | `ruff`, `mypy --strict`, `eslint`, `tsc`, `cargo clippy -D warnings`, `cargo fmt --check` | All clean |
 | 2026-10-17 | Live backend process | `python -m jlt` + curl | ✅ handshake, auth, origin, loopback-only bind, no key leak |
 | 2026-10-17 | Live session on real Teams | `POST /api/session/start` then `/stop` | ✅ helper spawned, STT connected, `no_audio` warning correct, **0 orphans and 0 sockets after stop** |
+| 2026-10-17 | Audible capture (display filter) | helper + `afplay`, 6.08 s | ✅ **peak 7517, RMS −32.7 dBFS** — real audio, not a shaped silent stream |
+| 2026-10-17 | Helper JSON key set | `--list-sources` across 36 sources | ✅ after fixing Swift to emit explicit nulls; previously `bundle_id`/`pid` were omitted for displays |
 | 2026-10-16 | Live Teams capture | `--capture app:com.microsoft.teams2`, 8 s | 366,720 bytes = 7.64 s at 24 kHz mono 16-bit; 382 frames; **0 dropped**; clean SIGINT exit 0. **Signal was silent (peak 0)** — Teams had no audio playing. Audibility remains unverified. |
 
 Entries are appended only after a command actually runs. No row is written in
@@ -251,10 +259,9 @@ advance.
 
 ## Open issues
 
-1. **Audio tap audibility unverified.** The capture path produces a correctly
-   framed stream, but every sample so far has been zero because no audio was
-   playing. This is the single remaining Phase 1 acceptance item. See Phase 1
-   above for the one-command check.
+1. **The per-application capture filter has not been shown to carry audio.**
+   System-audio capture is verified to produce real signal; the Teams-specific
+   filter has only been run against a silent Teams. See Phase 1 for the check.
 2. **Spoken identifiers do not survive STT as written identifiers.**
    Confirmed live. Must be handled in Phase 3 by the translation prompt plus a
    deterministic normalisation pass, with the case in the golden dataset.

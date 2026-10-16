@@ -27,6 +27,27 @@ struct SourceDescriptor: Encodable {
     let bundle_id: String?
     let pid: Int?
     let is_recommended: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case id, kind, name, bundle_id, pid, is_recommended
+    }
+
+    /// Encodes nil optionals as explicit `null` rather than omitting the key.
+    ///
+    /// Swift's synthesised encoder uses `encodeIfPresent` for optionals, which
+    /// drops the key entirely. That left display sources with no `bundle_id`
+    /// field at all, diverging from both the documented protocol and the test
+    /// fake — and a fake whose shape differs from the real helper is a fake
+    /// that can hide a bug.
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(name, forKey: .name)
+        try container.encode(bundle_id, forKey: .bundle_id)
+        try container.encode(pid, forKey: .pid)
+        try container.encode(is_recommended, forKey: .is_recommended)
+    }
 }
 
 enum SourceEnumerator {

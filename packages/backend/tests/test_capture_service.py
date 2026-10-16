@@ -143,3 +143,17 @@ def test_env_override_wins_over_discovery(monkeypatch, tmp_path):
 
     monkeypatch.setenv("JLT_AUDIO_HELPER", str(tmp_path / "custom-tap"))
     assert default_helper_path() == tmp_path / "custom-tap"
+
+
+async def test_every_source_entry_has_the_full_key_set(shim: Path):
+    """The helper must emit explicit nulls, not omit keys.
+
+    Swift's synthesised encoder drops nil optionals, which once left display
+    sources with no `bundle_id` field at all — diverging from the documented
+    protocol and from this fake.
+    """
+    os.environ["FAKE_HELPER_MODE"] = "ok"
+    sources = await AudioCaptureService(helper_path=shim).list_sources()
+    for source in sources:
+        dumped = source.model_dump()
+        assert set(dumped) == {"id", "kind", "name", "bundle_id", "pid", "is_recommended"}
