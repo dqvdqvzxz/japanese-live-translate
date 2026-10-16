@@ -31,7 +31,7 @@ test: ## Run backend and frontend tests
 	cd $(DESKTOP) && npm test --if-present
 
 lint: ## Lint and type-check everything
-	cd $(BACKEND) && uv run ruff check . && uv run ruff format --check . && uv run mypy
+	cd $(BACKEND) && uv run ruff check . ../../scripts && uv run ruff format --check . ../../scripts && uv run mypy
 	cd $(DESKTOP) && npm run lint --if-present && npx tsc --noEmit
 
 verify-openai: ## Probe the live OpenAI API (requires OPENAI_API_KEY)

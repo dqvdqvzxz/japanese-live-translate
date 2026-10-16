@@ -87,18 +87,22 @@ stays open, and Phase 1 is not called complete.
 | `TranscriptManager` — publishes `transcript.partial` / `transcript.final` | ✅ |
 | Measured STT latency (commit → completed) | ✅ |
 | Unit tests against a fake WebSocket | ✅ — 41 tests |
-| Live smoke test against the real API | 🟡 pending — needs `OPENAI_API_KEY` |
+| Live smoke test against the real API | ✅ — `scripts/smoke_stt.py` |
 
-**Acceptance: PARTIALLY MET.** All offline behaviour is implemented and tested
-against frames shaped exactly as the official docs specify. The live smoke test
-and the WebSocket-URL resolution still need a real key:
+**Acceptance: MET.** `make verify-openai` resolved the WebSocket URL to
+`wss://api.openai.com/v1/realtime?intent=transcription` (server replied
+`session.created`), and confirmed both models are available to the project.
 
-```
-export OPENAI_API_KEY='sk-...' && make verify-openai
-```
+`scripts/smoke_stt.py` then streamed synthesised Japanese through the
+production provider and got back correct partials and finals, in order, with no
+duplicates. First partial 949–1057 ms after audio start; commit→final
+682–685 ms. **n=2 on synthetic speech — indicative, not a benchmark.**
 
-Until that runs, the provider will try each candidate URL at connect time and
-report an actionable error if none is accepted.
+One real finding, recorded in `docs/openai-verification.md` §3b: a spoken
+ticket id does not arrive as a written identifier. Keyword hints improved it
+(kanji numerals → digits) but did not restore `ABC-1234`. Identifier
+reconstruction is therefore a Phase 3 responsibility, not something to assume
+the STT layer provides.
 
 ## Phase 3 — Translation
 SegmentManager merge/completeness/dedupe, bounded TranslationQueue with
@@ -139,6 +143,9 @@ benchmarks, 60-minute run, packaging, docs.
 | 2026-10-16 | Argument validation | `--rate 48000` | rejected, exit 64 |
 | 2026-10-16 | Phase 2 STT suite | `uv run pytest -q` | **116 passed** (75 → 116; +29 provider, +12 transcript manager) |
 | 2026-10-16 | Phase 2 lint + types | `ruff check`, `ruff format --check`, `mypy --strict` | All clean, 17 source files |
+| 2026-10-16 | Live OpenAI verification | `make verify-openai` | ✅ both models available; WS URL resolved to `?intent=transcription` (`session.created`); Responses round-trip correct, negation and ticket id preserved; `reasoning_tokens: 0` confirms `effort: none` |
+| 2026-10-16 | Live STT smoke test | `scripts/smoke_stt.py` | ✅ 2/2 finals, seqs `[1, 2]`, 0 duplicates; first partial 949–1057 ms; commit→final 682–685 ms (synthetic speech, n=2) |
+| 2026-10-16 | Keyword-hint efficacy | ad-hoc A/B on the same sentence | ⚠️ partial: `千二百三十四` → `1234`, letters stayed `A B C`; see openai-verification.md §3b |
 | 2026-10-16 | Live Teams capture | `--capture app:com.microsoft.teams2`, 8 s | 366,720 bytes = 7.64 s at 24 kHz mono 16-bit; 382 frames; **0 dropped**; clean SIGINT exit 0. **Signal was silent (peak 0)** — Teams had no audio playing. Audibility remains unverified. |
 
 Entries are appended only after a command actually runs. No row is written in
@@ -150,10 +157,10 @@ advance.
    framed stream, but every sample so far has been zero because no audio was
    playing. This is the single remaining Phase 1 acceptance item. See Phase 1
    above for the one-command check.
-2. **Realtime transcription WebSocket URL is not pinned in the public docs.**
-   Mitigated by configuration + a probe script. Must be settled by
-   `make verify-openai` (needs `OPENAI_API_KEY`) before Phase 2 can be called
-   complete.
+2. **Spoken identifiers do not survive STT as written identifiers.**
+   Confirmed live. Must be handled in Phase 3 by the translation prompt plus a
+   deterministic normalisation pass, with the case in the golden dataset.
+   Not yet tested with human speech.
 3. **Full Xcode absent.** Only matters for signing and notarizing a release
    build; SwiftPM itself works with the Command Line Tools.
 4. **`uv` is not on the non-login shell PATH.** See the environment table.

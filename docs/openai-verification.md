@@ -108,11 +108,16 @@ Verified facts:
    `gpt-live-transcribe`. Our UI and data model therefore do not promise any of
    these. Wall-clock timestamps in our events are locally generated.
 
-### Unverified: the exact WebSocket URL for a transcription session
+### Resolved empirically: the WebSocket URL for a transcription session
 
-This is the one gap. The transcription guide says to connect "with WebSocket"
-but links to the generic connection guide without giving a transcription-specific
-URL. What *is* documented:
+**Verified 2026-10-16 against a live API project.**
+`wss://api.openai.com/v1/realtime?intent=transcription` accepted the
+transcription `session.update` and the server replied `session.created`.
+Reproduce with `make verify-openai`.
+
+This was the one documentation gap. The transcription guide says to connect
+"with WebSocket" but links to the generic connection guide without giving a
+transcription-specific URL. What *is* documented:
 
 - The Realtime WebSocket URL pattern is
   `wss://api.openai.com/v1/realtime?model=<model>` with header
@@ -123,17 +128,17 @@ URL. What *is* documented:
   `v1/realtime/transcription_sessions`.
 
 Because the docs do not show a single authoritative transcription WebSocket URL,
-**we do not hardcode one and we do not guess silently.** Instead:
+**we did not hardcode one on faith.** The design remains:
 
-- `JLT_OPENAI_REALTIME_URL` is configurable.
-- The default is `wss://api.openai.com/v1/realtime?intent=transcription`, with
-  documented fallback candidates tried in order (see
-  `OpenAIRealtimeSTTProvider.CANDIDATE_URLS`).
-- `scripts/verify_openai.py` probes the candidates against a real API key and
-  reports which one actually accepts a transcription `session.update`.
-  **Run it before trusting the default.** Its output is the verification
-  evidence for this item; until it is run, this item is *pending manual
-  verification*.
+- `JLT_OPENAI_REALTIME_URL` overrides everything, for an operator who needs to
+  pin a different endpoint.
+- Otherwise candidates are tried in order and the first one accepted becomes
+  sticky for the session, so reconnects do not re-probe.
+- `scripts/verify_openai.py` resolves it against a real key.
+
+The fallback machinery is kept rather than deleted now that the answer is
+known: the project that works today is not necessarily every project, and an
+endpoint that moves should produce a reconnect rather than an outage.
 
 ---
 
@@ -155,6 +160,55 @@ and [guides/reasoning](https://developers.openai.com/api/docs/guides/reasoning).
   is not retained by OpenAI for later retrieval. See `docs/security.md`.
 
 ---
+
+## 3b. Observed live behaviour (smoke test, 2026-10-16)
+
+Measured by `scripts/smoke_stt.py`, which synthesises Japanese with the macOS
+`Kyoko` voice, converts it to 24 kHz mono PCM16 and streams it through the
+production provider. **Synthetic speech, n=2 — indicative, not a benchmark.**
+
+| Observation | Value |
+|---|---|
+| First partial delta | 949 ms and 1057 ms after audio start |
+| `commit` → `completed` | 682 ms and 685 ms |
+| Sequence numbers | correct and in order |
+| Duplicate finals | none |
+
+Sentence 1 came back exactly right:
+`来週のリリースは延期されません。` — including the negation.
+
+### Finding: spoken identifiers do not survive as written identifiers
+
+Sentence 2 was `チケットABC-1234のステータスを確認してください。`
+The transcript was:
+
+| Configuration | Transcript fragment |
+|---|---|
+| no hints | `チケットA B Cの千二百三十四の…` |
+| `keywords: ["ABC-1234"]` + topic `prompt` | `チケットA B Cの1234の…` |
+
+Keyword and prompt hints **helped but did not fix it**: the number changed from
+kanji numerals to digits, while the letters stayed separated as `A B C`.
+
+Be careful about what this does and does not show. The input was text-to-speech,
+and `Kyoko` pronounces `ABC-1234` as separated letters followed by a number — so
+the model arguably transcribed what it actually heard. A human saying the same
+ticket id may well transcribe better. **This has not been tested with human
+speech and must not be reported as a model defect.**
+
+What it does establish is a product risk that the design must absorb: an
+identifier spoken aloud reaches the translation stage as spaced letters and a
+bare number, not as `ABC-1234`. Relying on the STT layer to preserve identifiers
+is therefore not safe.
+
+**Consequence for Phase 3:** identifier reconstruction belongs in the
+translation stage, not the STT stage —
+- the translation prompt is given the glossary's identifiers and instructed to
+  restore them;
+- a deterministic pre-pass normalises `A B C の 1234` / `A B C の千二百三十四`
+  shapes back to `ABC-1234` when the glossary contains a matching identifier,
+  because a deterministic rule beats asking a model to be careful;
+- the golden dataset carries this exact sentence as a regression case.
 
 ## 4. Pricing (for the cost estimator and the benchmark report)
 
@@ -189,9 +243,10 @@ returns a `usage` object. We record both when present and never synthesize them.
 | No timestamps / speaker labels / confidence | Not exposed in our schema or UI |
 | `languages` is plural for this model | Config sends `languages: ["ja"]`; sending `language` would be rejected |
 | Keyword charset restrictions | Glossary terms sanitized (`<`, `>`, CR, LF stripped) before `session.update` |
-| Realtime transcription WS URL not pinned in docs | Configurable + probe script; see §2 |
+| Realtime transcription WS URL not pinned in docs | Resolved 2026-10-16 to `?intent=transcription`; fallback + override retained; see §2 |
 | `gpt-5.4-mini` is a reasoning model | `reasoning.effort: "none"` sent explicitly for latency |
 | Prompt length limit for `transcription.prompt` not published | Glossary prompt truncated to a conservative 2,000 characters |
+| Spoken identifiers arrive as spaced letters + bare numbers (§3b) | Reconstructed at the translation stage, deterministically where the glossary allows |
 
 ---
 

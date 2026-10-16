@@ -27,7 +27,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "packages", "backend", "src"))
 
-from jlt.config import (  # noqa: E402
+from jlt.config import (
     REALTIME_URL_CANDIDATES,
     RESPONSES_URL,
     SAMPLE_RATE_HZ,
@@ -120,7 +120,7 @@ async def check_realtime_url(api_key: str) -> str | None:
                     if kind == "error":
                         fail(f"server error: {event.get('error', event)}")
                         break
-        except Exception as exc:  # noqa: BLE001 - this is a probe; report anything
+        except Exception as exc:
             fail(f"{type(exc).__name__}: {exc}")
 
     fail(

@@ -29,8 +29,12 @@ TRANSLATION_MODEL = "gpt-5.4-mini"
 RESPONSES_URL = "https://api.openai.com/v1/responses"
 
 #: The transcription WebSocket URL is the one item the public docs do not pin
-#: down (see docs/openai-verification.md §2). Rather than guess silently we try
-#: documented candidates in order and let `scripts/verify_openai.py` settle it.
+#: down (see docs/openai-verification.md §2), so it was settled empirically.
+#:
+#: Verified 2026-10-16 by `scripts/verify_openai.py`: the first URL below was
+#: accepted and the server replied `session.created`. The second is kept as a
+#: fallback because the docs show `?model=` as the general Realtime pattern,
+#: and a project without the `intent` form should still connect.
 REALTIME_URL_CANDIDATES: tuple[str, ...] = (
     "wss://api.openai.com/v1/realtime?intent=transcription",
     f"wss://api.openai.com/v1/realtime?model={STT_MODEL}",
