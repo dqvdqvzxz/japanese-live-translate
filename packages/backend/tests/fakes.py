@@ -194,6 +194,7 @@ class FakeCapture:
         self.stopped = False
         self.start_calls = 0
         self.include_microphone = False
+        self.on_warning = None
         self._release = asyncio.Event()
 
     async def list_sources(self):

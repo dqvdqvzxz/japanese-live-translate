@@ -16,7 +16,7 @@ import json
 import os
 import shutil
 import signal
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from typing import Any
 
@@ -98,6 +98,11 @@ class AudioCaptureService:
         self._start_error: CaptureError | None = None
         self._warnings: list[dict[str, Any]] = []
         self._stopped_stats: dict[str, Any] | None = None
+        #: Called with (code, message) for warnings the helper reports while
+        #: running. Without a route to the UI these were logged and nowhere
+        #: else, so a denied microphone or a silent source looked like the app
+        #: was simply not working.
+        self.on_warning: Callable[[str, str], None] | None = None
 
     # -- discovery ----------------------------------------------------------
 

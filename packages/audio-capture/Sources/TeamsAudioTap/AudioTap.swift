@@ -101,6 +101,21 @@ final class AudioTap: NSObject, SCStreamOutput, SCStreamDelegate {
 
         if includeMicrophone {
             if #available(macOS 15.0, *) {
+                // Ask for the permission explicitly rather than letting
+                // ScreenCaptureKit discover it is missing. Without this, a
+                // denied or never-requested microphone produces no buffers,
+                // no error and no prompt — the capture simply runs silent,
+                // which is indistinguishable from a quiet room.
+                guard requestMicrophoneAccess() else {
+                    Control.warning(
+                        code: "microphone_denied",
+                        message: "Microphone access was not granted. Enable it in System Settings "
+                               + "> Privacy & Security > Microphone, then restart the app. "
+                               + "Continuing with application audio only."
+                    )
+                    config.captureMicrophone = false
+                    return try await startStream(filter: filter, config: config, name: name)
+                }
                 config.captureMicrophone = true
             } else {
                 Control.warning(
@@ -110,9 +125,37 @@ final class AudioTap: NSObject, SCStreamOutput, SCStreamDelegate {
             }
         }
 
+        return try await startStream(filter: filter, config: config, name: name)
+    }
+
+    /// Block until the user answers the microphone prompt.
+    ///
+    /// `AVCaptureDevice` is what actually triggers the system dialog;
+    /// ScreenCaptureKit assumes the permission already exists.
+    private func requestMicrophoneAccess() -> Bool {
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .authorized:
+            return true
+        case .notDetermined:
+            let gate = DispatchSemaphore(value: 0)
+            var granted = false
+            AVCaptureDevice.requestAccess(for: .audio) { allowed in
+                granted = allowed
+                gate.signal()
+            }
+            gate.wait()
+            return granted
+        default:
+            return false
+        }
+    }
+
+    private func startStream(filter: SCContentFilter,
+                             config: SCStreamConfiguration,
+                             name: String) async throws -> String {
         let stream = SCStream(filter: filter, configuration: config, delegate: self)
         try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: sampleQueue)
-        if includeMicrophone, #available(macOS 15.0, *) {
+        if includeMicrophone, #available(macOS 15.0, *), config.captureMicrophone {
             do {
                 try stream.addStreamOutput(self, type: .microphone, sampleHandlerQueue: micQueue)
             } catch {

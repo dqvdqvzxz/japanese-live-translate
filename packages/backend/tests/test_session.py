@@ -391,3 +391,17 @@ async def test_the_microphone_setting_reaches_the_capture_helper(tmp_path):
     await session.start("app:x")
     assert capture.include_microphone is True
     await session.stop()
+
+
+async def test_capture_warnings_reach_the_user_not_just_the_log(tmp_path):
+    """A denied microphone or a silent source produced nothing but a log line,
+    so from the outside the app simply looked broken."""
+    session, recorder, capture, _ = build(tmp_path)
+    await session.start("app:x")
+    capture.on_warning("microphone_denied", "Microphone access was not granted.")
+
+    warnings = [e for e in recorder.of("error") if e.code == "microphone_denied"]
+    assert warnings, "the warning must be published to the UI"
+    assert warnings[0].severity == "warning"
+    assert "Microphone" in warnings[0].message
+    await session.stop()

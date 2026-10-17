@@ -179,6 +179,10 @@ class SessionManager:
     async def _build(self, settings: Settings, source_id: str) -> None:
         capture = self._capture_factory()
         self._capture = capture
+        # Surface helper problems — a denied microphone, a silent source — in
+        # the UI rather than only in the log.
+        if hasattr(capture, "on_warning"):
+            capture.on_warning = self._on_capture_warning
         self.source = await capture.start(
             source_id, include_microphone=settings.audio.include_microphone
         )
@@ -343,6 +347,20 @@ class SessionManager:
                     self._log_heartbeat()
         except asyncio.CancelledError:
             raise
+
+    def _on_capture_warning(self, code: str, message: str) -> None:
+        if not self.session_id:
+            return
+        log.warning("capture warning surfaced", extra={"code": code})
+        self._dispatcher.publish(
+            ErrorEvent(
+                session_id=self.session_id,
+                severity="warning",
+                code=code,
+                message=message,
+                retryable=False,
+            )
+        )
 
     def _log_heartbeat(self) -> None:
         """A counter-only snapshot of the whole pipeline.
