@@ -228,6 +228,8 @@ stream.
 | Package a macOS application | ✅ self-contained `.app` (24.3 MB) and `.dmg` (20.6 MB) |
 | Installation and usage documentation | ✅ `docs/installation.md` |
 | API key entry in the packaged app | ✅ Keychain input in Settings, with restart |
+| Actionable Screen Recording permission dialog | ✅ opens the exact System Settings pane |
+| Info section: attribution and data handling (Japanese) | ✅ |
 | Code signing and notarization | ⛔ needs an Apple Developer ID |
 
 **Acceptance: PARTIALLY MET.** Everything that can be verified on this machine

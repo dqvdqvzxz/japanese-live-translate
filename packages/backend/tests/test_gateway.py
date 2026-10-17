@@ -258,3 +258,98 @@ def test_a_foreign_origin_gets_no_cors_grant(client):
     )
     assert response.headers.get("access-control-allow-origin") != "https://evil.example"
     assert response.headers.get("access-control-allow-origin") != "*"
+
+
+# --- structured errors ------------------------------------------------------
+#
+# The UI must branch on the failure (open System Settings for a permission
+# problem, open Settings for a missing key). It cannot do that by matching on
+# prose, so every error carries a code.
+
+
+def test_errors_carry_a_code_and_a_message(client):
+    body = client.get("/api/settings").json()
+    assert body["detail"]["code"] == "unauthorized"
+    assert body["detail"]["message"]
+
+
+def test_permission_denied_is_identifiable_by_code(tmp_path):
+    """The UI shows a button that opens System Settings for exactly this code."""
+    from fastapi.testclient import TestClient
+
+    from jlt.audio.capture_service import PermissionDenied
+    from jlt.events import EventDispatcher
+    from jlt.gateway import create_app
+    from jlt.session import SessionManager
+    from jlt.settings_manager import SettingsManager
+
+    from .fakes import FakeCapture, FakeTranslationProvider, ScriptedStt
+
+    class DeniedCapture(FakeCapture):
+        async def list_sources(self):
+            raise PermissionDenied("permission_denied", "Screen Recording permission is required.")
+
+    dispatcher = EventDispatcher()
+    session = SessionManager(
+        SettingsManager(tmp_path, api_key_present=True),
+        dispatcher,
+        capture_factory=DeniedCapture,
+        stt_factory=lambda _s: ScriptedStt(),
+        translation_factory=lambda _s: FakeTranslationProvider(),
+    )
+    app = create_app(
+        token=TOKEN,
+        settings_manager=SettingsManager(tmp_path, api_key_present=True),
+        session=session,
+        dispatcher=dispatcher,
+        started_at=0.0,
+    )
+    with TestClient(app) as local:
+        response = local.get("/api/audio/sources", headers=AUTH)
+    assert response.status_code == 403
+    assert response.json()["detail"]["code"] == "permission_denied"
+    assert "Screen Recording" in response.json()["detail"]["message"]
+
+
+def test_session_conflict_carries_its_code(client):
+    client.post("/api/session/start", headers=AUTH, json={"source_id": "app:x"})
+    body = client.post("/api/session/start", headers=AUTH, json={"source_id": "app:x"}).json()
+    assert body["detail"]["code"] == "already_running"
+    client.post("/api/session/stop", headers=AUTH)
+
+
+def test_invalid_settings_carry_a_code(client):
+    body = client.patch("/api/settings", headers=AUTH, json={"ui": {"font_size": 999}}).json()
+    assert body["detail"]["code"] == "invalid_settings"
+
+
+def test_missing_api_key_is_identifiable(tmp_path):
+    """The UI opens the settings panel on this one, so it must be a code."""
+    from fastapi.testclient import TestClient
+
+    from jlt.events import EventDispatcher
+    from jlt.gateway import create_app
+    from jlt.session import SessionManager
+    from jlt.settings_manager import SettingsManager
+
+    from .fakes import FakeCapture, FakeTranslationProvider, ScriptedStt
+
+    settings_manager = SettingsManager(tmp_path, api_key_present=False)
+    dispatcher = EventDispatcher()
+    session = SessionManager(
+        settings_manager,
+        dispatcher,
+        capture_factory=FakeCapture,
+        stt_factory=lambda _s: ScriptedStt(),
+        translation_factory=lambda _s: FakeTranslationProvider(),
+    )
+    app = create_app(
+        token=TOKEN,
+        settings_manager=settings_manager,
+        session=session,
+        dispatcher=dispatcher,
+        started_at=0.0,
+    )
+    with TestClient(app) as local:
+        body = local.post("/api/session/start", headers=AUTH, json={"source_id": "app:x"}).json()
+    assert body["detail"]["code"] == "api_key_missing"

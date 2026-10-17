@@ -28,6 +28,39 @@ export interface Settings {
   api_key_present: boolean;
 }
 
+/** An error the UI can act on, rather than a string to print. */
+export class ApiError extends Error {
+  constructor(
+    readonly code: string,
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+
+  static async from(response: Response): Promise<ApiError> {
+    try {
+      const body = (await response.json()) as { detail?: unknown };
+      const detail = body.detail;
+      if (detail && typeof detail === "object" && "code" in detail) {
+        const { code, message } = detail as { code: string; message?: string };
+        return new ApiError(code, message ?? code, response.status);
+      }
+      if (typeof detail === "string") {
+        return new ApiError("error", detail, response.status);
+      }
+    } catch {
+      // Fall through to the status line.
+    }
+    return new ApiError(
+      "error",
+      `${response.status} ${response.statusText}`,
+      response.status,
+    );
+  }
+}
+
 export class BackendClient {
   private socket: WebSocket | null = null;
   private closedByUs = false;
@@ -50,9 +83,10 @@ export class BackendClient {
     });
     if (!response.ok) {
       // The backend's error messages are content-free by design, so surfacing
-      // them verbatim cannot leak meeting text.
-      const detail = await response.text().catch(() => "");
-      throw new Error(detail || `${response.status} ${response.statusText}`);
+      // them verbatim cannot leak meeting text. The code is what the UI
+      // branches on — showing the raw JSON body to a user, as an earlier
+      // version did, is not an error message.
+      throw await ApiError.from(response);
     }
     return (await response.json()) as T;
   }

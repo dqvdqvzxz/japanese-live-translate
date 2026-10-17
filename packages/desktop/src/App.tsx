@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
-import { BackendClient, resolveBackend, type Settings } from "./api/client";
+import { ApiError, BackendClient, resolveBackend, type Settings } from "./api/client";
 import { startMockStream } from "./api/mock";
 import { setAlwaysOnTop } from "./api/tauri";
 import { Controls } from "./components/Controls";
 import { HistoryPanel } from "./components/HistoryPanel";
+import { PermissionDialog } from "./components/PermissionDialog";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { StatusBar } from "./components/StatusBar";
 import { SubtitleView } from "./components/SubtitleView";
@@ -33,10 +34,12 @@ export default function App() {
   const [panel, setPanel] = useState<Panel>("none");
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [permissionError, setPermissionError] = useState<string | null>(null);
   const stopMock = useRef<(() => void) | null>(null);
 
   // Connect to the backend, or fall back to the demo stream when there is no
   // Tauri shell to supply the port and token.
+  const [reloadKey, setReloadKey] = useState(0);
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -94,7 +97,7 @@ export default function App() {
           });
         }
       } catch (error) {
-        if (!cancelled) setActionError(String(error));
+        if (!cancelled) report(error);
       }
     })();
 
@@ -103,9 +106,10 @@ export default function App() {
       stopMock.current?.();
       client?.close();
     };
-    // Intentionally runs once: re-running would restart the stream.
+    // Re-runs only when the user asks to retry after granting permission;
+    // re-running for any other reason would restart the event stream.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [reloadKey]);
 
   // Theme. "system" means follow the OS, which is the default.
   const theme = settings?.ui.theme ?? "system";
@@ -118,6 +122,15 @@ export default function App() {
     }
   }, [theme]);
 
+  /** A permission failure needs a dialog with a way out, not a red banner. */
+  const report = useCallback((error: unknown) => {
+    if (error instanceof ApiError && error.code === "permission_denied") {
+      setPermissionError(error.message);
+      return;
+    }
+    setActionError(error instanceof ApiError ? error.message : String(error));
+  }, []);
+
   const run = useCallback(
     async (action: () => Promise<unknown>) => {
       setBusy(true);
@@ -125,12 +138,12 @@ export default function App() {
       try {
         await action();
       } catch (error) {
-        setActionError(String(error));
+        report(error);
       } finally {
         setBusy(false);
       }
     },
-    [],
+    [report],
   );
 
   const patchSettings = useCallback(
@@ -186,6 +199,17 @@ export default function App() {
         <div className={`banner banner--${bannerKind}`} role="alert">
           {banner}
         </div>
+      )}
+
+      {permissionError && (
+        <PermissionDialog
+          message={permissionError}
+          onRetry={() => {
+            setPermissionError(null);
+            setReloadKey((n) => n + 1);
+          }}
+          onDismiss={() => setPermissionError(null)}
+        />
       )}
 
       <main className="app__body">

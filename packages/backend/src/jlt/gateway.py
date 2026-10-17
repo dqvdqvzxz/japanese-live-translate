@@ -49,6 +49,17 @@ ALLOWED_ORIGINS = frozenset(
 WS_CLOSE_UNAUTHORIZED = 4401
 
 
+def api_error(status: int, code: str, message: str) -> HTTPException:
+    """A machine-readable error.
+
+    The UI has to act differently on different failures — a missing Screen
+    Recording permission needs a button that opens System Settings, a missing
+    API key needs the settings panel — and it cannot do that by matching on
+    prose. `detail` is therefore an object, not a string.
+    """
+    return HTTPException(status_code=status, detail={"code": code, "message": message})
+
+
 class StartRequest(BaseModel):
     source_id: str
 
@@ -96,12 +107,12 @@ def create_app(
         authorization: str | None = Header(default=None),
     ) -> None:
         if not _origin_allowed(request.headers.get("origin")):
-            raise HTTPException(status_code=403, detail="origin_not_allowed")
+            raise api_error(403, "origin_not_allowed", "This origin is not allowed.")
         presented = None
         if authorization and authorization.lower().startswith("bearer "):
             presented = authorization[7:]
         if not token_matches(token, presented):
-            raise HTTPException(status_code=401, detail="unauthorized")
+            raise api_error(401, "unauthorized", "Missing or invalid token.")
 
     guard = [Depends(authorize)]
 
@@ -127,7 +138,7 @@ def create_app(
         try:
             return settings_manager.update(patch).model_dump()
         except ValidationError as exc:
-            raise HTTPException(status_code=422, detail=_first_error(exc)) from exc
+            raise api_error(422, "invalid_settings", _first_error(exc)) from exc
 
     @app.post("/api/glossary", dependencies=guard)
     async def set_glossary(payload: GlossaryRequest) -> dict[str, int]:
@@ -140,9 +151,9 @@ def create_app(
         try:
             sources = await session.list_sources()
         except PermissionDenied as exc:
-            raise HTTPException(status_code=403, detail=str(exc)) from exc
+            raise api_error(403, exc.code, str(exc)) from exc
         except CaptureError as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
+            raise api_error(503, exc.code, str(exc)) from exc
         return {"sources": [source.model_dump() for source in sources]}
 
     # -- session ------------------------------------------------------------
@@ -153,11 +164,11 @@ def create_app(
             session_id = await session.start(payload.source_id)
         except SessionError as exc:
             status = 409 if exc.code in ("already_running", "api_key_missing") else 400
-            raise HTTPException(status_code=status, detail=str(exc)) from exc
+            raise api_error(status, exc.code, str(exc)) from exc
         except PermissionDenied as exc:
-            raise HTTPException(status_code=403, detail=str(exc)) from exc
+            raise api_error(403, exc.code, str(exc)) from exc
         except CaptureError as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
+            raise api_error(503, exc.code, str(exc)) from exc
         return {"session_id": session_id}
 
     @app.post("/api/session/pause", dependencies=guard)
@@ -228,7 +239,9 @@ def create_app(
 
     @app.exception_handler(SessionError)
     async def session_error_handler(_: Request, exc: SessionError) -> JSONResponse:
-        return JSONResponse(status_code=409, content={"detail": str(exc)})
+        return JSONResponse(
+            status_code=409, content={"detail": {"code": exc.code, "message": str(exc)}}
+        )
 
     return app
 
@@ -247,7 +260,7 @@ async def _session_action(action: Any) -> Any:
         return await action()
     except SessionError as exc:
         status = 409 if exc.code in ("not_running", "not_paused", "already_running") else 400
-        raise HTTPException(status_code=status, detail=str(exc)) from exc
+        raise api_error(status, exc.code, str(exc)) from exc
 
 
 def _first_error(exc: ValidationError) -> str:

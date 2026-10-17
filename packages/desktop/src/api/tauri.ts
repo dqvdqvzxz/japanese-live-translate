@@ -48,6 +48,11 @@ export async function setAlwaysOnTop(enabled: boolean): Promise<void> {
   await invoke("set_always_on_top", { enabled });
 }
 
+/** Opens System Settings at Privacy & Security > Screen Recording. */
+export async function openScreenRecordingSettings(): Promise<void> {
+  await invoke("open_screen_recording_settings");
+}
+
 /**
  * Restart the app.
  *

@@ -78,6 +78,18 @@ Opting into `persist_transcripts` creates `history.sqlite3` with mode 0600 in
 the Application Support directory. The UI states plainly that this writes
 meeting content to disk, and offers "Delete all history".
 
+### What the in-app notice says, and why
+
+The Info section in Settings states, in Japanese, that the only destination for
+audio and text is the OpenAI API — not that data is never sent to a third
+party. The second claim would be false: OpenAI *is* a third party, audio is
+sent for transcription and Japanese text is sent for translation.
+
+This matters beyond pedantry. Other meeting participants may read that notice
+and rely on it, and a privacy claim that someone relies on has to be true. The
+accurate version is still reassuring: one destination, no storage, no
+telemetry, and capture only on an explicit press of Start.
+
 ### What OpenAI receives and retains
 
 Audio and text are sent to OpenAI to be processed — this is inherent to the

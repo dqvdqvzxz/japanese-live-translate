@@ -246,3 +246,52 @@ body {
   background: var(--bg); color: var(--fg); font-family: ui-monospace, monospace;
 }
 .panel__error { color: var(--danger); font-size: 11px; margin: 0 0 8px; }
+
+/* --- modal -------------------------------------------------------------- */
+
+.modal {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.55);
+}
+.modal__card {
+  max-width: 400px;
+  padding: 16px 18px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-elevated);
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.35);
+}
+.modal__card h2 { margin: 0 0 10px; font-size: 15px; }
+.modal__card p { margin: 0 0 10px; font-size: 12px; line-height: 1.5; color: var(--fg-dim); }
+.modal__detail { color: var(--fg-faint) !important; font-size: 11px !important; }
+.modal__steps { margin: 0 0 12px; padding-left: 20px; font-size: 12px; line-height: 1.7; color: var(--fg); }
+.modal__actions { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* --- info --------------------------------------------------------------- */
+
+.info__app { margin: 0 0 4px; font-size: 13px; font-weight: 600; }
+.info__version { color: var(--fg-faint); font-weight: 400; }
+.info__heading {
+  margin: 14px 0 6px; font-size: 12px; color: var(--fg);
+  text-transform: none; letter-spacing: 0;
+}
+.info__list {
+  margin: 0 0 10px; padding-left: 18px;
+  font-size: 11px; line-height: 1.65; color: var(--fg-dim);
+}
+.info__list li { margin-bottom: 5px; }
+.info__list code {
+  font-family: ui-monospace, monospace; font-size: 10px;
+  padding: 0 3px; border-radius: 3px; background: var(--border); color: var(--fg);
+}
+.info__note {
+  font-size: 11px; line-height: 1.6; color: var(--warn);
+  background: var(--warn-bg); border-radius: var(--radius);
+  padding: 8px; margin: 0 0 10px;
+}

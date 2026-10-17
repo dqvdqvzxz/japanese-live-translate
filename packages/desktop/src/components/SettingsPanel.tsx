@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { Settings } from "../api/client";
 import { clearApiKey, isDesktop, relaunch, storeApiKey } from "../api/tauri";
+import { InfoSection } from "./InfoSection";
 
 interface Props {
   settings: Settings | null;
@@ -226,6 +227,7 @@ export function SettingsPanel({ settings, onPatch, onClose, onClearHistory }: Pr
           </p>
         )}
       </section>
+      <InfoSection />
     </div>
   );
 }

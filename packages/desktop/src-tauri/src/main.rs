@@ -96,6 +96,21 @@ fn set_always_on_top(window: tauri::Window, enabled: bool) -> Result<(), String>
     window.set_always_on_top(enabled).map_err(|e| e.to_string())
 }
 
+/// Open System Settings directly at Privacy & Security > Screen Recording.
+///
+/// macOS requires this permission for ScreenCaptureKit even though the app
+/// only reads audio. Telling a user to "find it in System Settings" is a poor
+/// substitute for taking them there.
+#[tauri::command]
+fn open_screen_recording_settings() -> Result<(), String> {
+    let url = "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture";
+    Command::new("/usr/bin/open")
+        .arg(url)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
 /// Restart the app.
 ///
 /// The backend is handed the API key in its environment when it is spawned, so
@@ -241,6 +256,7 @@ fn main() {
             has_api_key,
             clear_api_key,
             set_always_on_top,
+            open_screen_recording_settings,
             relaunch,
         ])
         .setup(|app| {
