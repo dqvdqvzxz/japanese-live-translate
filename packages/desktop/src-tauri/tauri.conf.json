@@ -18,7 +18,7 @@
         "height": 620,
         "minWidth": 320,
         "minHeight": 240,
-        "alwaysOnTop": true,
+        "alwaysOnTop": false,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
         "resizable": true

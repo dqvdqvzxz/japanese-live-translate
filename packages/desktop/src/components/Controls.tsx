@@ -30,20 +30,22 @@ interface Props {
   onPause: () => void;
   onResume: () => void;
   onToggleAlwaysOnTop: () => void;
+  settingsOpen: boolean;
   onOpenSettings: () => void;
 }
 
 export function Controls({
   historyOpen, onToggleHistory,
   sources, selected, onSelect, capture, busy, alwaysOnTop,
-  onStart, onStop, onPause, onResume, onToggleAlwaysOnTop, onOpenSettings,
+  onStart, onStop, onPause, onResume, onToggleAlwaysOnTop,
+  settingsOpen, onOpenSettings,
 }: Props) {
   const running = capture === "running";
   const paused = capture === "paused";
   const active = running || paused;
 
   return (
-    <header className="controls" data-tauri-drag-region>
+    <header className="controls">
       <button
         className={`btn btn--icon ${historyOpen ? "btn--on" : ""}`}
         onClick={onToggleHistory}
@@ -103,7 +105,12 @@ export function Controls({
       >
         Pin
       </button>
-      <button className="btn btn--icon" onClick={onOpenSettings} title="Settings">
+      <button
+        className={`btn btn--icon ${settingsOpen ? "btn--on" : ""}`}
+        onClick={onOpenSettings}
+        aria-pressed={settingsOpen}
+        title="Settings"
+      >
         Settings
       </button>
     </header>

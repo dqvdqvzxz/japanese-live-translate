@@ -72,36 +72,52 @@ body {
    the live transcript, which is the one thing a user cannot scroll back to. */
 .app__body--with-sidebar { display: grid; grid-template-columns: minmax(180px, 240px) 1fr; }
 
+/* --- title bar ---------------------------------------------------------- */
+
+.titlebar {
+  display: flex;
+  align-items: center;
+  /* Clears the macOS traffic lights, which sit over the webview because the
+     window uses an overlay title bar. */
+  padding: 0 10px 0 78px;
+  height: 30px;
+  flex: none;
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--border);
+  /* Nothing here is interactive, so the whole strip is a drag handle. */
+  cursor: default;
+  user-select: none;
+}
+.titlebar__title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--fg-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none; /* clicks fall through to the drag region */
+}
+.titlebar__live {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--live); flex: none;
+}
+
 /* --- controls ----------------------------------------------------------- */
 
 .controls {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 10px 8px 78px; /* room for the macOS traffic lights */
+  padding: 8px 10px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-elevated);
   flex-wrap: wrap;
-  /* The whole bar drags the window. Interactive children opt out below, so
-   * the draggable area is the gaps and the padding — which is why the bar
-   * keeps generous gaps even when it wraps. Previously the bar was almost
-   * entirely controls, leaving barely anything to grab. */
-  -webkit-app-region: drag;
-  app-region: drag;
-  user-select: none;
+  flex: none;
 }
-.controls button,
-.controls select,
-.controls input,
-.controls label {
-  -webkit-app-region: no-drag;
-  app-region: no-drag;
-}
-.controls__spacer {
-  flex: 1 1 24px;
-  align-self: stretch;
-  min-width: 24px;
-}
+.controls__spacer { flex: 1 1 16px; min-width: 8px; }
 .controls__source {
   flex: 1 1 180px;
   min-width: 0;

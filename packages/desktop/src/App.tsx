@@ -9,6 +9,7 @@ import { NameRecordingDialog } from "./components/NameRecordingDialog";
 import { PermissionDialog } from "./components/PermissionDialog";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { StatusBar } from "./components/StatusBar";
+import { TitleBar } from "./components/TitleBar";
 import { SubtitleView } from "./components/SubtitleView";
 import { initialState, subtitleReducer } from "./state/subtitles";
 import type { AudioSource } from "./types/events";
@@ -204,8 +205,18 @@ export default function App() {
   const toggleAlwaysOnTop = useCallback(() => {
     const next = !(settings?.ui.always_on_top ?? true);
     patchSettings({ ui: { always_on_top: next } });
-    void setAlwaysOnTop(next);
-  }, [settings, patchSettings]);
+    void run(() => setAlwaysOnTop(next));
+  }, [settings, patchSettings, run]);
+
+  // The window now starts un-pinned and the stored preference is applied once
+  // settings arrive. Previously the config pinned it at creation, so a stored
+  // "off" was never applied: the button showed unpinned while the window went
+  // on floating above everything.
+  const storedAlwaysOnTop = settings?.ui.always_on_top;
+  useEffect(() => {
+    if (storedAlwaysOnTop === undefined) return;
+    void setAlwaysOnTop(storedAlwaysOnTop);
+  }, [storedAlwaysOnTop]);
 
   const fontSize = settings?.ui.font_size ?? 18;
   const showPartials = settings?.ui.show_partials ?? true;
@@ -227,6 +238,10 @@ export default function App() {
 
   return (
     <div className="app">
+      <TitleBar
+        title={viewing && record ? record.session.name || "Bản ghi" : "Japanese Live Translator"}
+        live={state.capture === "running"}
+      />
       <Controls
         historyOpen={historyOpen}
         onToggleHistory={() => {
@@ -256,6 +271,7 @@ export default function App() {
         onPause={() => client && run(() => client.pause())}
         onResume={() => client && run(() => client.resume())}
         onToggleAlwaysOnTop={toggleAlwaysOnTop}
+        settingsOpen={panel === "settings"}
         onOpenSettings={() => setPanel(panel === "settings" ? "none" : "settings")}
       />
 

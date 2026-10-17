@@ -25,11 +25,18 @@ export function SettingsPanel({ settings, onPatch, onClose, onClearHistory }: Pr
   const [keyState, setKeyState] = useState<"idle" | "saving" | "saved" | "removed">("idle");
   const [keyError, setKeyError] = useState<string | null>(null);
   const [replacingKey, setReplacingKey] = useState(false);
+  const [folderError, setFolderError] = useState<string | null>(null);
 
   const pickFolder = async () => {
-    const folder = await chooseFolder();
-    // A cancelled picker returns null, which must not wipe the current choice.
-    if (folder) onPatch({ privacy: { transcript_folder: folder } });
+    setFolderError(null);
+    try {
+      const folder = await chooseFolder();
+      // A cancelled picker returns null, which must not wipe the current
+      // choice — cancelling means "leave it alone", not "clear it".
+      if (folder) onPatch({ privacy: { transcript_folder: folder } });
+    } catch (error) {
+      setFolderError(String(error));
+    }
   };
 
   if (!settings) return null;
@@ -129,34 +136,43 @@ export function SettingsPanel({ settings, onPatch, onClose, onClearHistory }: Pr
               bản ghi.
             </p>
             {privacy.transcript_folder ? (
-              <>
-                <code className="panel__path" title={privacy.transcript_folder}>
-                  {privacy.transcript_folder}
-                </code>
-                <div className="panel__row">
-                  <button className="btn btn--small" onClick={pickFolder}>
-                    Đổi thư mục
-                  </button>
-                  {isDesktop() && (
-                    <button
-                      className="btn btn--small"
-                      onClick={() => void revealInFinder(privacy.transcript_folder!)}
-                    >
-                      Mở trong Finder
-                    </button>
-                  )}
-                </div>
-              </>
+              <code className="panel__path" title={privacy.transcript_folder}>
+                {privacy.transcript_folder}
+              </code>
             ) : (
-              <>
-                <p className="panel__warn">
-                  Chưa chọn thư mục — hiện chỉ lưu vào cơ sở dữ liệu nội bộ của app.
-                </p>
-                <button className="btn btn--primary btn--small" onClick={pickFolder}>
-                  Chọn thư mục…
-                </button>
-              </>
+              <p className="panel__warn">
+                Chưa chọn thư mục — hiện chỉ lưu vào cơ sở dữ liệu nội bộ của app.
+              </p>
             )}
+
+            {/* The picker is the macOS system panel, so it exists only in the
+                app. Showing a button here that silently does nothing in a
+                browser is worse than saying why it is unavailable. */}
+            {isDesktop() ? (
+              <div className="panel__row">
+                <button
+                  className={`btn btn--small ${privacy.transcript_folder ? "" : "btn--primary"}`}
+                  onClick={pickFolder}
+                >
+                  {privacy.transcript_folder ? "Đổi thư mục" : "Chọn thư mục…"}
+                </button>
+                {privacy.transcript_folder && (
+                  <button
+                    className="btn btn--small"
+                    onClick={() => void revealInFinder(privacy.transcript_folder!)}
+                  >
+                    Mở trong Finder
+                  </button>
+                )}
+              </div>
+            ) : (
+              <p className="panel__hint">
+                Chọn thư mục chỉ làm được trong ứng dụng desktop — trình duyệt
+                không mở được hộp thoại chọn thư mục của macOS.
+              </p>
+            )}
+
+            {folderError && <p className="panel__error">{folderError}</p>}
           </div>
         )}
         {confirmPersist && (
@@ -290,8 +306,8 @@ export function SettingsPanel({ settings, onPatch, onClose, onClearHistory }: Pr
           </>
         ) : (
           <p className="panel__hint">
-            Running in a browser. The key can only be stored from the desktop
-            app, which owns the Keychain.
+            Đang chạy trong trình duyệt. Khoá chỉ nhập được trong ứng dụng
+            desktop, vì chỉ ứng dụng mới ghi được vào macOS Keychain.
           </p>
         )}
       </section>
