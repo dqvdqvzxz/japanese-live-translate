@@ -322,7 +322,10 @@ class SessionManager:
     async def _tick(self) -> None:
         """Flush held fragments and publish status on a fixed cadence."""
         last_status = 0.0
-        last_heartbeat = 0.0
+        # Not zero: a heartbeat fired on the very first tick reports all
+        # zeros before a single frame has arrived, which reads as a dead
+        # pipeline when nothing has had a chance to happen yet.
+        last_heartbeat = self._clock()
         try:
             while True:
                 await asyncio.sleep(TICK_INTERVAL_S)
@@ -355,6 +358,7 @@ class SessionManager:
             extra={
                 "capture": self._capture_state,
                 "stt": self._stt_state,
+                "frames_in": stream.frames_in if stream else 0,
                 "level_dbfs": round(stream.level_dbfs, 1) if stream else None,
                 "speech_audio_s": round(stream.audio_seconds_sent, 1) if stream else 0.0,
                 "commits": stream.seq if stream else 0,

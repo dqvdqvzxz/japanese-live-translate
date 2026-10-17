@@ -42,6 +42,10 @@ class AudioStreamManager:
         self._paused = False
         self._seq = 0
         self._dropped_frames = 0
+        #: Frames handed over by the capture helper. Distinguishes "the helper
+        #: is sending nothing" from "it is sending silence", which look
+        #: identical from the level alone.
+        self._frames_in = 0
         self._audio_seconds_sent = 0.0
         self._pump_task: asyncio.Task[None] | None = None
 
@@ -49,6 +53,7 @@ class AudioStreamManager:
 
     def offer(self, frame: bytes) -> None:
         """Called from the capture reader. Never blocks, never awaits."""
+        self._frames_in += 1
         if self._paused:
             return
         try:
@@ -141,6 +146,10 @@ class AudioStreamManager:
     @property
     def queue_depth(self) -> int:
         return self._queue.qsize()
+
+    @property
+    def frames_in(self) -> int:
+        return self._frames_in
 
     @property
     def dropped_frames(self) -> int:

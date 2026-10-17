@@ -90,3 +90,23 @@ async def test_stop_flushes_an_open_turn():
     mgr = manager(stt)
     await mgr.run(frames_from([SPEECH] * 40))  # ends mid-speech
     assert stt.commits == [1], "stopping mid-sentence must not lose the sentence"
+
+
+async def test_frames_in_counts_what_the_helper_delivered():
+    """Separates "the helper sent nothing" from "it sent silence" — the two
+    are indistinguishable from the level alone, and they have different causes."""
+    stt = FakeSttProvider()
+    mgr = manager(stt)
+    for _ in range(7):
+        mgr.offer(SILENCE)
+    assert mgr.frames_in == 7
+    assert stt.total_bytes == 0
+
+
+async def test_frames_in_counts_frames_arriving_while_paused():
+    """A paused session still proves the helper is alive."""
+    stt = FakeSttProvider()
+    mgr = manager(stt)
+    await mgr.pause()
+    mgr.offer(SPEECH)
+    assert mgr.frames_in == 1
