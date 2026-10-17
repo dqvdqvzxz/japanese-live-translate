@@ -3,7 +3,8 @@ import { ApiError, BackendClient, resolveBackend, type Settings } from "./api/cl
 import { startMockStream } from "./api/mock";
 import { setAlwaysOnTop } from "./api/tauri";
 import { Controls } from "./components/Controls";
-import { HistoryPanel } from "./components/HistoryPanel";
+import { HistorySidebar } from "./components/HistorySidebar";
+import { RecordView } from "./components/RecordView";
 import { NameRecordingDialog } from "./components/NameRecordingDialog";
 import { PermissionDialog } from "./components/PermissionDialog";
 import { SettingsPanel } from "./components/SettingsPanel";
@@ -11,6 +12,7 @@ import { StatusBar } from "./components/StatusBar";
 import { SubtitleView } from "./components/SubtitleView";
 import { initialState, subtitleReducer } from "./state/subtitles";
 import type { AudioSource } from "./types/events";
+import type { SessionRecord, StoredSegment } from "./api/client";
 
 const FALLBACK_SETTINGS: Settings = {
   stt: { delay: "low", languages: ["ja"], prompt: null },
@@ -18,11 +20,11 @@ const FALLBACK_SETTINGS: Settings = {
   segmentation: {},
   vad: {},
   ui: { theme: "system", font_size: 18, always_on_top: true, show_partials: true },
-  privacy: { persist_transcripts: false, persist_audio: false },
+  privacy: { persist_transcripts: false, transcript_folder: null, persist_audio: false },
   api_key_present: false,
 };
 
-type Panel = "none" | "settings" | "history";
+type Panel = "none" | "settings";
 
 export default function App() {
   const [state, dispatch] = useReducer(subtitleReducer, initialState);
@@ -38,6 +40,14 @@ export default function App() {
   const [permissionError, setPermissionError] = useState<string | null>(null);
   /** Set when a session has just stopped and is waiting to be named. */
   const [naming, setNaming] = useState<{ id: string; lines: number } | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [sessions, setSessions] = useState<SessionRecord[]>([]);
+  const [persisting, setPersisting] = useState(true);
+  const [viewing, setViewing] = useState<string | null>(null);
+  const [record, setRecord] = useState<{
+    session: SessionRecord;
+    segments: StoredSegment[];
+  } | null>(null);
   const stopMock = useRef<(() => void) | null>(null);
 
   // Connect to the backend, or fall back to the demo stream when there is no
@@ -149,6 +159,40 @@ export default function App() {
     [report],
   );
 
+  const refreshHistory = useCallback(async () => {
+    if (!client) return;
+    try {
+      const body = await client.listSessions();
+      setSessions(body.sessions);
+      setPersisting(body.persisting);
+    } catch (error) {
+      report(error);
+    }
+  }, [client, report]);
+
+  useEffect(() => {
+    if (historyOpen) void refreshHistory();
+  }, [historyOpen, refreshHistory]);
+
+  useEffect(() => {
+    if (!client || !viewing) {
+      setRecord(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const body = await client.sessionDetail(viewing);
+        if (!cancelled) setRecord(body);
+      } catch (error) {
+        if (!cancelled) report(error);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [client, viewing, report]);
+
   const patchSettings = useCallback(
     (patch: Record<string, unknown>) => {
       setSettings((current) => (current ? deepMerge(current, patch) : current));
@@ -184,6 +228,11 @@ export default function App() {
   return (
     <div className="app">
       <Controls
+        historyOpen={historyOpen}
+        onToggleHistory={() => {
+          setHistoryOpen((open) => !open);
+          if (historyOpen) setViewing(null);
+        }}
         sources={sources}
         selected={selected}
         onSelect={setSelected}
@@ -201,6 +250,7 @@ export default function App() {
             if (sessionId) {
               setNaming({ id: sessionId, lines: result.stats?.segments_translated ?? 0 });
             }
+            await refreshHistory();
           })
         }
         onPause={() => client && run(() => client.pause())}
@@ -222,7 +272,10 @@ export default function App() {
           onSave={(name) => {
             const id = naming.id;
             setNaming(null);
-            if (client) void run(() => client.renameSession(id, name));
+            if (client) void run(async () => {
+              await client.renameSession(id, name);
+              await refreshHistory();
+            });
           }}
           onSkip={() => setNaming(null)}
         />
@@ -239,8 +292,51 @@ export default function App() {
         />
       )}
 
-      <main className="app__body">
-        {content}
+      <main className={`app__body ${historyOpen ? "app__body--with-sidebar" : ""}`}>
+        {historyOpen && (
+          <HistorySidebar
+            sessions={sessions}
+            persisting={persisting}
+            selectedId={viewing}
+            onSelect={setViewing}
+            onOpenSettings={() => setPanel("settings")}
+          />
+        )}
+
+        {viewing && record ? (
+          <RecordView
+            session={record.session}
+            segments={record.segments}
+            fontSize={fontSize}
+            busy={busy}
+            onRename={(name) =>
+              client &&
+              run(async () => {
+                await client.renameSession(record.session.session_id, name);
+                setRecord(await client.sessionDetail(record.session.session_id));
+                await refreshHistory();
+              })
+            }
+            onSummarize={() =>
+              client &&
+              run(async () => {
+                await client.summarize(record.session.session_id);
+                setRecord(await client.sessionDetail(record.session.session_id));
+                await refreshHistory();
+              })
+            }
+            onDelete={() =>
+              client &&
+              run(async () => {
+                await client.deleteSession(record.session.session_id);
+                setViewing(null);
+                await refreshHistory();
+              })
+            }
+          />
+        ) : (
+          content
+        )}
         {panel === "settings" && (
           <SettingsPanel
             settings={settings}
@@ -253,21 +349,7 @@ export default function App() {
             })}
           />
         )}
-        {panel === "history" && (
-          <HistoryPanel
-            client={client}
-            onClose={() => setPanel("none")}
-            onEnablePersistence={() => setPanel("settings")}
-          />
-        )}
       </main>
-
-      <button
-        className="app__history-toggle btn btn--icon"
-        onClick={() => setPanel(panel === "history" ? "none" : "history")}
-      >
-        History
-      </button>
 
       <StatusBar state={state} connected={connected} mock={mock} />
     </div>

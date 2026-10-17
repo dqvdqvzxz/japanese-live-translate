@@ -21,6 +21,7 @@ import json
 import os
 import signal
 import sys
+from pathlib import Path
 
 import uvicorn
 
@@ -51,9 +52,15 @@ async def run() -> int:
 
     settings_manager = SettingsManager(api_key_present=api_key is not None)
     dispatcher = EventDispatcher()
+    privacy = settings_manager.settings.privacy
     history = HistoryManager(
-        persist=settings_manager.settings.privacy.persist_transcripts,
+        persist=privacy.persist_transcripts,
         db_path=settings_manager.history_path,
+        transcript_dir=(
+            Path(privacy.transcript_folder)
+            if privacy.persist_transcripts and privacy.transcript_folder
+            else None
+        ),
     )
 
     if api_key is None:

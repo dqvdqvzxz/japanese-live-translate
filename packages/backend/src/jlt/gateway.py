@@ -16,9 +16,10 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response, WebSocket
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ValidationError
@@ -27,15 +28,6 @@ from starlette.websockets import WebSocketDisconnect
 from . import __version__
 from .audio.capture_service import CaptureError, PermissionDenied
 from .events import EventDispatcher
-from .export import (
-    EXTENSIONS,
-    MEDIA_TYPES,
-    archive_filename,
-    render,
-    render_all,
-    render_bundle,
-)
-from .export import filename as export_filename
 from .logging import get_logger
 from .models import GlossaryEntry
 from .secrets import Secret, token_matches
@@ -153,9 +145,22 @@ def create_app(
     @app.patch("/api/settings", dependencies=guard)
     async def patch_settings(patch: dict[str, Any]) -> dict[str, Any]:
         try:
-            return settings_manager.update(patch).model_dump()
+            updated = settings_manager.update(patch)
         except ValidationError as exc:
             raise api_error(422, "invalid_settings", _first_error(exc)) from exc
+
+        # Storage settings must take effect now, not on the next launch.
+        privacy = updated.privacy
+        session.history.reconfigure(
+            persist=privacy.persist_transcripts,
+            db_path=settings_manager.history_path,
+            transcript_dir=(
+                Path(privacy.transcript_folder)
+                if privacy.persist_transcripts and privacy.transcript_folder
+                else None
+            ),
+        )
+        return updated.model_dump()
 
     @app.post("/api/glossary", dependencies=guard)
     async def set_glossary(payload: GlossaryRequest) -> dict[str, int]:
@@ -237,56 +242,6 @@ def create_app(
             "sessions": [r.model_dump() for r in session.history.list_sessions(limit)],
         }
 
-    @app.get("/api/history/export/bundle", dependencies=guard)
-    async def export_bundle(
-        fmt: str = Query(default="md", alias="format"),
-    ) -> dict[str, Any]:
-        """Every meeting as a separate file, for writing into one folder.
-
-        Returned as JSON rather than an archive because the desktop shell
-        writes the folder natively; a single blob of a year's meetings would
-        not be something anyone could search.
-        """
-        if fmt not in EXTENSIONS:
-            raise api_error(
-                400, "unsupported_format", f"Supported formats: {', '.join(EXTENSIONS)}."
-            )
-        records = session.history.list_sessions(limit=10_000)
-        if not records:
-            raise api_error(404, "history_empty", "There is nothing to export yet.")
-        bundle = [
-            (record, session.history.session_segments(record.session_id)) for record in records
-        ]
-        return render_bundle(bundle, fmt)  # type: ignore[arg-type]
-
-    @app.get("/api/history/export", dependencies=guard)
-    async def export_all(fmt: str = Query(default="md", alias="format")) -> Response:
-        """Export every stored session as one file.
-
-        Declared before the per-session route so `/export` is not mistaken for
-        a session id.
-        """
-        if fmt not in EXTENSIONS:
-            raise api_error(
-                400, "unsupported_format", f"Supported formats: {', '.join(EXTENSIONS)}."
-            )
-        records = session.history.list_sessions(limit=10_000)
-        if not records:
-            raise api_error(404, "history_empty", "There is nothing to export yet.")
-        bundle = [
-            (record, session.history.session_segments(record.session_id)) for record in records
-        ]
-        body = render_all(bundle, fmt)  # type: ignore[arg-type]
-        return Response(
-            content=body,
-            media_type=MEDIA_TYPES[fmt],
-            headers={
-                "Content-Disposition": (
-                    f'attachment; filename="{archive_filename(fmt)}"'  # type: ignore[arg-type]
-                )
-            },
-        )
-
     @app.get("/api/history/sessions/{session_id}", dependencies=guard)
     async def session_detail(session_id: str) -> dict[str, Any]:
         record = session.history.get_session(session_id)
@@ -303,6 +258,7 @@ def create_app(
             raise api_error(404, "session_not_found", "No such session in history.")
         record = session.history.rename(session_id, payload.name)
         assert record is not None
+        session.history.write_transcript_file(session_id)
         return record.model_dump()
 
     @app.post("/api/history/sessions/{session_id}/summary", dependencies=guard)
@@ -318,30 +274,8 @@ def create_app(
             raise api_error(
                 502, "summary_failed", f"Could not generate a summary: {type(exc).__name__}"
             ) from exc
+        session.history.write_transcript_file(session_id)
         return summary.model_dump()
-
-    @app.get("/api/history/sessions/{session_id}/export", dependencies=guard)
-    async def export_session(
-        session_id: str, fmt: str = Query(default="md", alias="format")
-    ) -> Response:
-        if fmt not in EXTENSIONS:
-            raise api_error(
-                400, "unsupported_format", f"Supported formats: {', '.join(EXTENSIONS)}."
-            )
-        record = session.history.get_session(session_id)
-        if record is None:
-            raise api_error(404, "session_not_found", "No such session in history.")
-        segments = session.history.session_segments(session_id)
-        body = render(record, segments, fmt)  # type: ignore[arg-type]
-        return Response(
-            content=body,
-            media_type=MEDIA_TYPES[fmt],
-            headers={
-                "Content-Disposition": (
-                    f'attachment; filename="{export_filename(record, fmt)}"'  # type: ignore[arg-type]
-                )
-            },
-        )
 
     @app.delete("/api/history/sessions/{session_id}", dependencies=guard)
     async def delete_session(session_id: str) -> dict[str, str]:

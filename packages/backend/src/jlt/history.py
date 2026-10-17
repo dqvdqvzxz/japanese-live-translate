@@ -11,6 +11,7 @@ offers to turn saving on rather than silently keeping nothing.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import sqlite3
 import time
@@ -28,6 +29,7 @@ _SCHEMA = """
 CREATE TABLE IF NOT EXISTS sessions (
     session_id          TEXT PRIMARY KEY,
     name                TEXT NOT NULL DEFAULT '',
+    file_path           TEXT,
     started_at          REAL NOT NULL,
     ended_at            REAL,
     duration_s          REAL NOT NULL DEFAULT 0,
@@ -60,11 +62,14 @@ class HistoryManager:
         *,
         persist: bool = False,
         db_path: Path | None = None,
+        transcript_dir: Path | None = None,
         max_items: int = MAX_IN_MEMORY,
     ) -> None:
         self._segments: deque[Segment] = deque(maxlen=max_items)
         self._persist = persist
         self._db_path = db_path
+        #: Where readable transcript files are written, if the user chose one.
+        self._transcript_dir = transcript_dir
         self._connection: sqlite3.Connection | None = None
         self._current: SessionRecord | None = None
         if persist:
@@ -84,6 +89,24 @@ class HistoryManager:
         # Meeting content on disk should at least be out of other users' reach.
         self._db_path.chmod(0o600)
 
+    def reconfigure(
+        self, *, persist: bool, db_path: Path | None, transcript_dir: Path | None
+    ) -> None:
+        """Apply a settings change without restarting.
+
+        Picking a folder in Settings has to take effect at once; making the
+        user quit and relaunch before anything is written would look like the
+        setting had simply not worked.
+        """
+        self._transcript_dir = transcript_dir
+        if persist == self.persisting and db_path == self._db_path:
+            return
+        self.close()
+        self._persist = persist
+        self._db_path = db_path
+        if persist:
+            self._open()
+
     def _migrate(self) -> None:
         """Add columns that later versions introduced.
 
@@ -97,6 +120,8 @@ class HistoryManager:
             self._connection.execute(
                 "ALTER TABLE sessions ADD COLUMN name TEXT NOT NULL DEFAULT ''"
             )
+        if "file_path" not in columns:
+            self._connection.execute("ALTER TABLE sessions ADD COLUMN file_path TEXT")
 
     @property
     def persisting(self) -> bool:
@@ -130,6 +155,58 @@ class HistoryManager:
             self._connection.commit()
         return self.get_session(session_id)
 
+    def write_transcript_file(self, session_id: str) -> str | None:
+        """Write the readable transcript into the folder the user chose.
+
+        Kept in step with the record rather than written once: a rename or a
+        newly generated summary should be reflected on disk, and the old file
+        removed, otherwise the folder fills with stale duplicates of the same
+        meeting.
+
+        Returns the path written, or None when no folder is configured.
+        """
+        if self._transcript_dir is None:
+            return None
+        record = self.get_session(session_id)
+        if record is None:
+            return None
+
+        from .export import filename as export_filename
+        from .export import render
+
+        segments = self.session_segments(session_id)
+        target = self._transcript_dir / export_filename(record, "md")
+        previous = self._file_path(session_id)
+
+        try:
+            self._transcript_dir.mkdir(parents=True, exist_ok=True)
+            target.write_text(render(record, segments, "md"), encoding="utf-8")
+            target.chmod(0o600)
+        except OSError as exc:
+            # A missing or read-only folder must not take the session down.
+            log.warning("could not write the transcript file", extra={"error": type(exc).__name__})
+            return None
+
+        if previous and previous != str(target):
+            with contextlib.suppress(OSError):
+                Path(previous).unlink()
+
+        if self._connection is not None:
+            self._connection.execute(
+                "UPDATE sessions SET file_path = ? WHERE session_id = ?",
+                (str(target), session_id),
+            )
+            self._connection.commit()
+        return str(target)
+
+    def _file_path(self, session_id: str) -> str | None:
+        if self._connection is None:
+            return None
+        row = self._connection.execute(
+            "SELECT file_path FROM sessions WHERE session_id = ?", (session_id,)
+        ).fetchone()
+        return row["file_path"] if row else None
+
     def end_session(self, record: SessionRecord) -> None:
         self._current = record
         if self._connection is None:
@@ -158,7 +235,15 @@ class HistoryManager:
     # -- segments -----------------------------------------------------------
 
     def add(self, session_id: str, segment: Segment) -> None:
-        self._segments.append(segment)
+        # Replace rather than append: a segment is recorded when it is queued
+        # and again when its translation lands, and the second must update the
+        # first rather than duplicate the line.
+        for index, existing in enumerate(self._segments):
+            if existing.segment_id == segment.segment_id:
+                self._segments[index] = segment
+                break
+        else:
+            self._segments.append(segment)
         if self._connection is None:
             return
         self._connection.execute(
@@ -286,4 +371,5 @@ def _record_from_row(row: sqlite3.Row) -> SessionRecord:
         usage=Usage(input_tokens=row["input_tokens"], output_tokens=row["output_tokens"]),
         estimated_cost_usd=row["estimated_cost_usd"],
         summary=summary,
+        file_path=row["file_path"],
     )

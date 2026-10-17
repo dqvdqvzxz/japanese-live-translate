@@ -18,18 +18,6 @@ export interface BackendInfo {
   token: string;
 }
 
-export type ExportFormat = "md" | "txt" | "json" | "csv";
-
-export interface ExportedFile {
-  filename: string;
-  body: string;
-}
-
-export interface ExportBundle {
-  folder: string;
-  files: { filename: string; content: string }[];
-}
-
 export interface SessionSummary {
   overview: string;
   action_items: string[];
@@ -52,6 +40,8 @@ export interface SessionRecord {
   /** Projection from published unit prices, not a billed amount. */
   estimated_cost_usd: number;
   summary: SessionSummary | null;
+  /** Where the readable transcript was written, when a folder is configured. */
+  file_path?: string | null;
 }
 
 export interface StoredSegment {
@@ -68,7 +58,12 @@ export interface Settings {
   segmentation: Record<string, unknown>;
   vad: Record<string, unknown>;
   ui: { theme: "system" | "light" | "dark"; font_size: number; always_on_top: boolean; show_partials: boolean };
-  privacy: { persist_transcripts: boolean; persist_audio: boolean };
+  privacy: {
+    persist_transcripts: boolean;
+    /** Where readable transcript files go. Null means database only. */
+    transcript_folder: string | null;
+    persist_audio: boolean;
+  };
   api_key_present: boolean;
 }
 
@@ -194,45 +189,11 @@ export class BackendClient {
     });
   }
 
-  /** One meeting. Returns the file and the name the backend suggests. */
-  exportSession(id: string, format: ExportFormat): Promise<ExportedFile> {
-    return this.download(
-      `/api/history/sessions/${encodeURIComponent(id)}/export?format=${format}`,
-      `meeting.${format}`,
-    );
-  }
-
-  /** Every stored meeting, as one file. Used only where a folder is impossible. */
-  exportAll(format: ExportFormat): Promise<ExportedFile> {
-    return this.download(
-      `/api/history/export?format=${format}`,
-      `meeting-history.${format}`,
-    );
-  }
-
-  /** Every stored meeting as a separate document, for writing into one folder. */
-  exportBundle(format: ExportFormat): Promise<ExportBundle> {
-    return this.request(`/api/history/export/bundle?format=${format}`);
-  }
-
   renameSession(id: string, name: string): Promise<SessionRecord> {
     return this.request(`/api/history/sessions/${encodeURIComponent(id)}`, {
       method: "PATCH",
       body: JSON.stringify({ name }),
     });
-  }
-
-  private async download(path: string, fallbackName: string): Promise<ExportedFile> {
-    const response = await fetch(`${this.base}${path}`, {
-      headers: { Authorization: `Bearer ${this.info.token}` },
-    });
-    if (!response.ok) throw await ApiError.from(response);
-    // Readable only because the backend lists Content-Disposition in
-    // Access-Control-Expose-Headers; otherwise every export would fall back
-    // to the generic name.
-    const disposition = response.headers.get("content-disposition") ?? "";
-    const match = /filename="([^"]+)"/.exec(disposition);
-    return { filename: match?.[1] ?? fallbackName, body: await response.text() };
   }
 
   metrics(): Promise<SessionStats> {

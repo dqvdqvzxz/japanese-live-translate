@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from jlt.export import render
@@ -312,31 +314,95 @@ def test_a_database_from_an_older_build_gains_the_name_column(tmp_path):
 # --- bundle -----------------------------------------------------------------
 
 
-def test_the_bundle_folder_is_named_for_today():
-    from jlt.export import render_bundle
-
-    bundle = render_bundle([(record("s_1", 1000.0), [segment(1)])], "md")
-    assert str(bundle["folder"]).startswith("All History - ")
+# --- transcript files in the user's folder ----------------------------------
 
 
-def test_each_bundle_file_holds_one_meeting():
-    from jlt.export import render_bundle
-
-    first = record("s_1", 1000.0)
-    first.name = "Alpha"
-    second = record("s_2", 2000.0)
-    second.name = "Beta"
-    files = render_bundle([(first, [segment(1)]), (second, [segment(2)])], "md")["files"]
-    names = [f["filename"] for f in files]  # type: ignore[index]
-    assert names == ["Alpha.md", "Beta.md"]
+def test_no_file_is_written_without_a_chosen_folder(tmp_path):
+    manager = HistoryManager(persist=True, db_path=tmp_path / "history.sqlite3")
+    manager.begin_session("s_1", "Teams", 1000.0)
+    manager.add("s_1", segment(1))
+    manager.end_session(record("s_1", 1000.0))
+    assert manager.write_transcript_file("s_1") is None
+    assert list(tmp_path.glob("*.md")) == []
 
 
-def test_colliding_names_are_disambiguated():
-    """Two recordings may legitimately both be called "Standup"."""
-    from jlt.export import render_bundle
+def test_a_transcript_file_is_written_into_the_chosen_folder(tmp_path):
+    folder = tmp_path / "Meetings"
+    manager = HistoryManager(
+        persist=True, db_path=tmp_path / "history.sqlite3", transcript_dir=folder
+    )
+    manager.begin_session("s_1", "Microsoft Teams", 1000.0)
+    manager.add("s_1", segment(1))
+    manager.end_session(record("s_1", 1000.0))
 
-    first, second = record("s_1", 1000.0), record("s_2", 2000.0)
-    first.name = second.name = "Standup"
-    files = render_bundle([(first, [segment(1)]), (second, [segment(2)])], "md")["files"]
-    names = [f["filename"] for f in files]  # type: ignore[index]
-    assert names == ["Standup.md", "Standup (2).md"]
+    written = manager.write_transcript_file("s_1")
+    assert written is not None
+    path = Path(written)
+    assert path.parent == folder
+    assert "Tiếng Việt1" in path.read_text(encoding="utf-8")
+
+
+def test_the_file_is_named_after_the_recording(tmp_path):
+    folder = tmp_path / "Meetings"
+    manager = HistoryManager(
+        persist=True, db_path=tmp_path / "history.sqlite3", transcript_dir=folder
+    )
+    manager.begin_session("s_1", "Teams", 1000.0)
+    manager.end_session(record("s_1", 1000.0))
+    manager.rename("s_1", "Sprint planning")
+    written = manager.write_transcript_file("s_1")
+    assert Path(written).name == "Sprint planning.md"  # type: ignore[arg-type]
+
+
+def test_renaming_does_not_leave_the_old_file_behind(tmp_path):
+    """Otherwise the folder fills with stale duplicates of one meeting."""
+    folder = tmp_path / "Meetings"
+    manager = HistoryManager(
+        persist=True, db_path=tmp_path / "history.sqlite3", transcript_dir=folder
+    )
+    manager.begin_session("s_1", "Teams", 1000.0)
+    manager.end_session(record("s_1", 1000.0))
+    manager.rename("s_1", "First name")
+    manager.write_transcript_file("s_1")
+    manager.rename("s_1", "Second name")
+    manager.write_transcript_file("s_1")
+
+    names = sorted(p.name for p in folder.glob("*.md"))
+    assert names == ["Second name.md"]
+
+
+def test_the_transcript_file_is_not_world_readable(tmp_path):
+    folder = tmp_path / "Meetings"
+    manager = HistoryManager(
+        persist=True, db_path=tmp_path / "history.sqlite3", transcript_dir=folder
+    )
+    manager.begin_session("s_1", "Teams", 1000.0)
+    manager.end_session(record("s_1", 1000.0))
+    written = manager.write_transcript_file("s_1")
+    assert Path(written).stat().st_mode & 0o077 == 0  # type: ignore[arg-type]
+
+
+def test_an_unwritable_folder_does_not_break_the_session(tmp_path):
+    """Losing a file is bad; losing the meeting because of it is worse."""
+    folder = tmp_path / "locked"
+    folder.mkdir()
+    folder.chmod(0o500)
+    try:
+        manager = HistoryManager(
+            persist=True, db_path=tmp_path / "history.sqlite3", transcript_dir=folder
+        )
+        manager.begin_session("s_1", "Teams", 1000.0)
+        manager.end_session(record("s_1", 1000.0))
+        assert manager.write_transcript_file("s_1") is None
+        assert manager.get_session("s_1") is not None
+    finally:
+        folder.chmod(0o700)
+
+
+def test_writing_an_unknown_session_is_a_no_op(tmp_path):
+    manager = HistoryManager(
+        persist=True,
+        db_path=tmp_path / "history.sqlite3",
+        transcript_dir=tmp_path / "Meetings",
+    )
+    assert manager.write_transcript_file("s_nope") is None

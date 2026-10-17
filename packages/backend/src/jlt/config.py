@@ -117,6 +117,11 @@ class UiSettings(BaseModel):
 
 class PrivacySettings(BaseModel):
     persist_transcripts: bool = False
+    #: Where the readable transcript files go. When unset, only the internal
+    #: history database is written. The user picks this explicitly, so the
+    #: meeting content lands somewhere they chose rather than somewhere the
+    #: app decided.
+    transcript_folder: str | None = None
     persist_audio: bool = False  # kept False; no code path writes audio
 
     @field_validator("persist_audio")

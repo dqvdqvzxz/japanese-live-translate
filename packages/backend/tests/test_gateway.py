@@ -421,24 +421,6 @@ def test_an_unknown_session_is_a_typed_404(client):
     assert body.json()["detail"]["code"] == "session_not_found"
 
 
-def test_export_returns_a_downloadable_file(client):
-    started = client.post("/api/session/start", headers=AUTH, json={"source_id": "app:x"}).json()[
-        "session_id"
-    ]
-    client.post("/api/session/stop", headers=AUTH)
-    response = client.get(f"/api/history/sessions/{started}/export?format=md", headers=AUTH)
-    assert response.status_code == 200
-    assert "attachment" in response.headers["content-disposition"]
-    assert response.headers["content-disposition"].endswith('.md"')
-    assert "Microsoft Teams" in response.text
-
-
-def test_export_rejects_an_unknown_format(client):
-    response = client.get("/api/history/sessions/s_1/export?format=pdf", headers=AUTH)
-    assert response.status_code == 400
-    assert response.json()["detail"]["code"] == "unsupported_format"
-
-
 def test_summarising_a_running_session_is_refused(client):
     """A recap of half a meeting is quietly incomplete, which is worse."""
     started = client.post("/api/session/start", headers=AUTH, json={"source_id": "app:x"}).json()[
@@ -459,43 +441,9 @@ def test_a_session_can_be_deleted(client):
     assert client.get("/api/history/sessions", headers=AUTH).json()["sessions"] == []
 
 
-@pytest.mark.parametrize(
-    "path",
-    ["/api/history/sessions", "/api/history/sessions/s_1", "/api/history/sessions/s_1/export"],
-)
+@pytest.mark.parametrize("path", ["/api/history/sessions", "/api/history/sessions/s_1"])
 def test_history_routes_require_a_token(client, path):
     assert client.get(path).status_code == 401
-
-
-def test_the_export_filename_is_readable_cross_origin(client):
-    """Cross-origin responses hide Content-Disposition unless it is exposed,
-    which silently reduced every export to a generic 'meeting.md'."""
-    response = client.get("/api/settings", headers={**AUTH, "Origin": "http://localhost:5173"})
-    exposed = response.headers.get("access-control-expose-headers", "")
-    assert "Content-Disposition" in exposed
-
-
-def test_the_whole_history_can_be_exported(persisting_client):
-    for _ in range(2):
-        persisting_client.post("/api/session/start", headers=AUTH, json={"source_id": "app:x"})
-        persisting_client.post("/api/session/stop", headers=AUTH)
-    response = persisting_client.get("/api/history/export?format=md", headers=AUTH)
-    assert response.status_code == 200
-    assert "# Meeting history" in response.text
-    assert "All History - " in response.headers["content-disposition"]
-
-
-def test_exporting_an_empty_history_says_so(client):
-    response = client.get("/api/history/export?format=md", headers=AUTH)
-    assert response.status_code == 404
-    assert response.json()["detail"]["code"] == "history_empty"
-
-
-def test_the_export_route_is_not_mistaken_for_a_session_id(client):
-    """`/api/history/export` must not resolve as a session whose id is "export"."""
-    client.post("/api/session/start", headers=AUTH, json={"source_id": "app:x"})
-    client.post("/api/session/stop", headers=AUTH)
-    assert client.get("/api/history/export?format=md", headers=AUTH).status_code == 200
 
 
 def test_a_recording_can_be_renamed(client):
@@ -517,39 +465,31 @@ def test_renaming_an_unknown_session_is_a_typed_404(client):
     assert response.json()["detail"]["code"] == "session_not_found"
 
 
-def test_the_bundle_gives_one_file_per_meeting(persisting_client):
-    """A year of meetings in one blob is not something anyone can search."""
-    for _ in range(2):
-        persisting_client.post("/api/session/start", headers=AUTH, json={"source_id": "app:x"})
-        persisting_client.post("/api/session/stop", headers=AUTH)
-    body = persisting_client.get("/api/history/export/bundle?format=md", headers=AUTH).json()
-    assert body["folder"].startswith("All History - ")
-    assert len(body["files"]) == 2
-    assert all(f["filename"].endswith(".md") for f in body["files"])
-
-
-def test_bundle_filenames_are_unique_even_when_names_collide(persisting_client):
-    ids = []
-    for _ in range(2):
-        ids.append(
-            persisting_client.post(
-                "/api/session/start", headers=AUTH, json={"source_id": "app:x"}
-            ).json()["session_id"]
-        )
-        persisting_client.post("/api/session/stop", headers=AUTH)
-    for session_id in ids:
-        persisting_client.patch(
-            f"/api/history/sessions/{session_id}", headers=AUTH, json={"name": "Standup"}
-        )
-    files = persisting_client.get("/api/history/export/bundle?format=md", headers=AUTH).json()[
-        "files"
+def test_choosing_a_transcript_folder_takes_effect_immediately(client, tmp_path):
+    """Requiring a restart would make the setting look like it had not worked."""
+    folder = tmp_path / "Meetings"
+    client.patch(
+        "/api/settings",
+        headers=AUTH,
+        json={"privacy": {"persist_transcripts": True, "transcript_folder": str(folder)}},
+    )
+    started = client.post("/api/session/start", headers=AUTH, json={"source_id": "app:x"}).json()[
+        "session_id"
     ]
-    names = [f["filename"] for f in files]
-    assert len(set(names)) == len(names)
-    assert "Standup.md" in names
+    client.post("/api/session/stop", headers=AUTH)
+
+    detail = client.get(f"/api/history/sessions/{started}", headers=AUTH).json()
+    assert detail["session"]["file_path"]
+    assert folder.exists()
 
 
-def test_an_empty_bundle_says_so(client):
-    response = client.get("/api/history/export/bundle?format=md", headers=AUTH)
-    assert response.status_code == 404
-    assert response.json()["detail"]["code"] == "history_empty"
+def test_turning_persistence_off_stops_writing(client, tmp_path):
+    folder = tmp_path / "Meetings"
+    client.patch(
+        "/api/settings",
+        headers=AUTH,
+        json={"privacy": {"persist_transcripts": True, "transcript_folder": str(folder)}},
+    )
+    client.patch("/api/settings", headers=AUTH, json={"privacy": {"persist_transcripts": False}})
+    body = client.get("/api/history/sessions", headers=AUTH).json()
+    assert body["persisting"] is False

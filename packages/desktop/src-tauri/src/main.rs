@@ -96,107 +96,40 @@ fn set_always_on_top(window: tauri::Window, enabled: bool) -> Result<(), String>
     window.set_always_on_top(enabled).map_err(|e| e.to_string())
 }
 
-/// Write an exported transcript to ~/Downloads and return the path.
+/// Ask macOS for a folder, using the system picker.
 ///
-/// The webview blocks ordinary blob downloads, so the export has to be written
-/// natively. A fixed location is used rather than a save dialog: it needs no
-/// extra plugin, and the user always knows where the file went.
-///
-/// The filename comes from the backend, but it is reduced to its last path
-/// component here regardless — a name is not a path, and accepting one would
-/// let a crafted value write outside the Downloads folder.
+/// Implemented with AppleScript rather than a dialog plugin: it is the native
+/// panel either way, and it keeps the dependency list short for one call.
+/// Returns None when the user cancels, which is not an error.
 #[tauri::command]
-fn save_to_downloads(filename: String, contents: String) -> Result<String, String> {
-    let name = std::path::Path::new(&filename)
-        .file_name()
-        .ok_or("invalid filename")?
-        .to_string_lossy()
-        .to_string();
+fn choose_folder() -> Result<Option<String>, String> {
+    let script = r#"POSIX path of (choose folder with prompt "Choose where to save transcripts")"#;
+    let output = Command::new("/usr/bin/osascript")
+        .args(["-e", script])
+        .output()
+        .map_err(|e| e.to_string())?;
 
-    let downloads = std::path::PathBuf::from(home_dir()).join("Downloads");
-    std::fs::create_dir_all(&downloads).map_err(|e| e.to_string())?;
-
-    // Do not silently overwrite an earlier export of the same meeting.
-    let mut target = downloads.join(&name);
-    if target.exists() {
-        let path = std::path::Path::new(&name);
-        let stem = path
-            .file_stem()
-            .map(|s| s.to_string_lossy().to_string())
-            .unwrap_or_else(|| name.clone());
-        let extension = path
-            .extension()
-            .map(|s| format!(".{}", s.to_string_lossy()))
-            .unwrap_or_default();
-        for n in 2..1000 {
-            let candidate = downloads.join(format!("{stem} ({n}){extension}"));
-            if !candidate.exists() {
-                target = candidate;
-                break;
-            }
+    if !output.status.success() {
+        // Cancelling exits non-zero with "User canceled"; that is not a failure.
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if stderr.contains("-128") || stderr.to_lowercase().contains("cancel") {
+            return Ok(None);
         }
+        return Err(stderr.trim().to_string());
     }
 
-    std::fs::write(&target, contents).map_err(|e| e.to_string())?;
-    Ok(target.to_string_lossy().to_string())
+    let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    Ok(if path.is_empty() { None } else { Some(path) })
 }
 
-#[derive(Debug, Deserialize)]
-struct ExportFile {
-    filename: String,
-    content: String,
-}
-
-/// Write a whole history export into one folder under ~/Downloads.
-///
-/// A year of meetings concatenated into a single file is not something anyone
-/// can search or file away, so each meeting is its own document and the folder
-/// is what the user gets.
-///
-/// Every name — the folder and each file — is reduced to its last path
-/// component before use. The backend already sanitises them, but a path
-/// arriving here must not be able to escape Downloads regardless of who built
-/// it.
+/// Reveal a path in Finder, so the user can check where transcripts went.
 #[tauri::command]
-fn save_folder_to_downloads(folder: String, files: Vec<ExportFile>) -> Result<String, String> {
-    let folder_name = leaf(&folder).ok_or("invalid folder name")?;
-    let mut target = std::path::PathBuf::from(home_dir())
-        .join("Downloads")
-        .join(&folder_name);
-
-    // Keep an earlier export of the same day rather than overwriting it.
-    if target.exists() {
-        for n in 2..1000 {
-            let candidate = std::path::PathBuf::from(home_dir())
-                .join("Downloads")
-                .join(format!("{folder_name} ({n})"));
-            if !candidate.exists() {
-                target = candidate;
-                break;
-            }
-        }
-    }
-    std::fs::create_dir_all(&target).map_err(|e| e.to_string())?;
-
-    for file in &files {
-        let name = leaf(&file.filename).ok_or("invalid filename")?;
-        std::fs::write(target.join(name), &file.content).map_err(|e| e.to_string())?;
-    }
-
-    Ok(target.to_string_lossy().to_string())
-}
-
-/// The last path component of a name, so a crafted value cannot escape its
-/// parent directory.
-fn leaf(name: &str) -> Option<String> {
-    let leaf = std::path::Path::new(name)
-        .file_name()?
-        .to_string_lossy()
-        .to_string();
-    if leaf.is_empty() || leaf == "." || leaf == ".." {
-        return None;
-    }
-    Some(leaf)
+fn reveal_in_finder(path: String) -> Result<(), String> {
+    Command::new("/usr/bin/open")
+        .args(["-R", &path])
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
 }
 
 /// Open System Settings directly at Privacy & Security > Screen Recording.
@@ -360,8 +293,8 @@ fn main() {
             clear_api_key,
             set_always_on_top,
             open_screen_recording_settings,
-            save_to_downloads,
-            save_folder_to_downloads,
+            choose_folder,
+            reveal_in_finder,
             relaunch,
         ])
         .setup(|app| {

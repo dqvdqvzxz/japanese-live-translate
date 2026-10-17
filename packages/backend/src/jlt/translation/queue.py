@@ -71,6 +71,7 @@ class TranslationQueue:
         settings: TranslationSettings,
         *,
         glossary: Callable[[], list[GlossaryEntry]] | None = None,
+        on_settled: Callable[[Segment], None] | None = None,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._session_id = session_id
@@ -78,6 +79,10 @@ class TranslationQueue:
         self._dispatcher = dispatcher
         self._settings = settings
         self._glossary = glossary or (lambda: [])
+        #: Called once a segment reaches its final state, so stored history can
+        #: be brought up to date. Without it the record written at submit time
+        #: keeps its empty translation forever.
+        self._on_settled = on_settled
         self._clock = clock
 
         self._queue: asyncio.Queue[_Job] = asyncio.Queue(maxsize=settings.max_queue)
@@ -286,6 +291,7 @@ class TranslationQueue:
                     reason=result.reason or "api_error",
                 )
             )
+            self._settle(segment)
             return
 
         segment.state = "translated"
@@ -309,6 +315,7 @@ class TranslationQueue:
         if len(self._context) > max(self._settings.context_size * 4, 16):
             del self._context[: -self._settings.context_size]
 
+        self._settle(segment)
         self._dispatcher.publish(
             SegmentTranslatedEvent(
                 session_id=self._session_id,
@@ -321,6 +328,15 @@ class TranslationQueue:
                 usage=result.usage,
             )
         )
+
+    def _settle(self, segment: Segment) -> None:
+        if self._on_settled is None:
+            return
+        try:
+            self._on_settled(segment)
+        except Exception as exc:
+            # Persisting history must never take down the translation pipeline.
+            log.warning("history update failed", extra={"error": type(exc).__name__})
 
     # -- observability ------------------------------------------------------
 

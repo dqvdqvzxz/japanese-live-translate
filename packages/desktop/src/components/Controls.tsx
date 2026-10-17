@@ -1,6 +1,24 @@
 import type { AudioSource } from "../types/events";
 
+/** A clock with a counter-clockwise arrow — the usual "history" glyph. */
+function HistoryIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden focusable="false">
+      <path
+        d="M3 3v6h6M3.5 9a9 9 0 1 0 2.2-3.6L3 9"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path d="M12 7v5l3.5 2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 interface Props {
+  historyOpen: boolean;
+  onToggleHistory: () => void;
   sources: AudioSource[];
   selected: string;
   onSelect: (id: string) => void;
@@ -16,6 +34,7 @@ interface Props {
 }
 
 export function Controls({
+  historyOpen, onToggleHistory,
   sources, selected, onSelect, capture, busy, alwaysOnTop,
   onStart, onStop, onPause, onResume, onToggleAlwaysOnTop, onOpenSettings,
 }: Props) {
@@ -24,7 +43,17 @@ export function Controls({
   const active = running || paused;
 
   return (
-    <header className="controls">
+    <header className="controls" data-tauri-drag-region>
+      <button
+        className={`btn btn--icon ${historyOpen ? "btn--on" : ""}`}
+        onClick={onToggleHistory}
+        aria-pressed={historyOpen}
+        aria-label="History"
+        title="History"
+      >
+        <HistoryIcon />
+      </button>
+
       <select
         className="controls__source"
         value={selected}

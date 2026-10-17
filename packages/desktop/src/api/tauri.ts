@@ -48,24 +48,16 @@ export async function setAlwaysOnTop(enabled: boolean): Promise<void> {
   await invoke("set_always_on_top", { enabled });
 }
 
-/**
- * Write a file to ~/Downloads and return its path.
- *
- * The webview blocks ordinary blob downloads, so in the desktop app the
- * native side writes the file. A fixed, predictable location beats a save
- * dialog here: it needs no extra plugin and the user always knows where the
- * export went.
- */
-export async function saveToDownloads(filename: string, contents: string): Promise<string> {
-  return invoke<string>("save_to_downloads", { filename, contents });
+/** Opens the native folder picker. Returns null when the user cancels. */
+export async function chooseFolder(): Promise<string | null> {
+  if (!isDesktop()) return null;
+  return invoke<string | null>("choose_folder");
 }
 
-/** Writes a whole-history export as one folder under ~/Downloads. */
-export async function saveFolderToDownloads(
-  folder: string,
-  files: { filename: string; content: string }[],
-): Promise<string> {
-  return invoke<string>("save_folder_to_downloads", { folder, files });
+/** Shows a path in Finder, so the user can check where transcripts landed. */
+export async function revealInFinder(path: string): Promise<void> {
+  if (!isDesktop()) return;
+  await invoke("reveal_in_finder", { path });
 }
 
 /** Opens System Settings at Privacy & Security > Screen Recording. */

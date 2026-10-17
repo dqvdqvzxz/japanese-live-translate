@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { Settings } from "../api/client";
-import { clearApiKey, isDesktop, relaunch, storeApiKey } from "../api/tauri";
+import { chooseFolder, clearApiKey, isDesktop, relaunch, revealInFinder, storeApiKey } from "../api/tauri";
 import { InfoSection } from "./InfoSection";
 
 interface Props {
@@ -24,6 +24,14 @@ export function SettingsPanel({ settings, onPatch, onClose, onClearHistory }: Pr
   const [keyInput, setKeyInput] = useState("");
   const [keyState, setKeyState] = useState<"idle" | "saving" | "saved" | "removed">("idle");
   const [keyError, setKeyError] = useState<string | null>(null);
+  const [replacingKey, setReplacingKey] = useState(false);
+
+  const pickFolder = async () => {
+    const folder = await chooseFolder();
+    // A cancelled picker returns null, which must not wipe the current choice.
+    if (folder) onPatch({ privacy: { transcript_folder: folder } });
+  };
+
   if (!settings) return null;
 
   const ui = settings.ui;
@@ -113,6 +121,44 @@ export function SettingsPanel({ settings, onPatch, onClose, onClearHistory }: Pr
           />
           Save transcripts to this Mac
         </label>
+
+        {privacy.persist_transcripts && (
+          <div className="panel__folder">
+            <p className="panel__hint">
+              Thư mục lưu transcript. Mỗi phiên là một tệp Markdown, đặt theo tên
+              bản ghi.
+            </p>
+            {privacy.transcript_folder ? (
+              <>
+                <code className="panel__path" title={privacy.transcript_folder}>
+                  {privacy.transcript_folder}
+                </code>
+                <div className="panel__row">
+                  <button className="btn btn--small" onClick={pickFolder}>
+                    Đổi thư mục
+                  </button>
+                  {isDesktop() && (
+                    <button
+                      className="btn btn--small"
+                      onClick={() => void revealInFinder(privacy.transcript_folder!)}
+                    >
+                      Mở trong Finder
+                    </button>
+                  )}
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="panel__warn">
+                  Chưa chọn thư mục — hiện chỉ lưu vào cơ sở dữ liệu nội bộ của app.
+                </p>
+                <button className="btn btn--primary btn--small" onClick={pickFolder}>
+                  Chọn thư mục…
+                </button>
+              </>
+            )}
+          </div>
+        )}
         {confirmPersist && (
           <div className="panel__confirm">
             This writes meeting content to disk in your Application Support
@@ -140,16 +186,29 @@ export function SettingsPanel({ settings, onPatch, onClose, onClearHistory }: Pr
 
       <section className="panel__section">
         <h3>OpenAI API key</h3>
-        <p className="panel__hint">
-          {settings.api_key_present
-            ? "A key is stored in your macOS Keychain."
-            : "No key stored. Capture cannot start without one."}
+        <p className={settings.api_key_present ? "panel__ok" : "panel__warn"}>
+          {settings.api_key_present ? (
+            <>
+              <span className="panel__tick" aria-hidden>
+                ✓
+              </span>{" "}
+              Đã cấu hình API key (lưu trong macOS Keychain).
+            </>
+          ) : (
+            "Chưa có API key. Không thể bắt đầu thu âm."
+          )}
         </p>
 
         {isDesktop() ? (
           <>
+            {settings.api_key_present && !replacingKey ? (
+              <button className="btn btn--small" onClick={() => setReplacingKey(true)}>
+                Thay khoá khác
+              </button>
+            ) : (
+            <>
             <label>
-              {settings.api_key_present ? "Replace the key" : "Paste your key"}
+              {settings.api_key_present ? "Khoá mới" : "Paste your key"}
               <input
                 type="password"
                 value={keyInput}
@@ -177,6 +236,7 @@ export function SettingsPanel({ settings, onPatch, onClose, onClearHistory }: Pr
                     // Overwrite the copy held in this component immediately.
                     setKeyInput("");
                     setKeyState("saved");
+                    setReplacingKey(false);
                   } catch (error) {
                     setKeyError(String(error));
                     setKeyState("idle");
@@ -201,6 +261,14 @@ export function SettingsPanel({ settings, onPatch, onClose, onClearHistory }: Pr
                 </button>
               )}
             </div>
+
+            {settings.api_key_present && (
+              <button className="btn btn--small" onClick={() => setReplacingKey(false)}>
+                Huỷ
+              </button>
+            )}
+            </>
+            )}
 
             {keyError && <p className="panel__error">{keyError}</p>}
 

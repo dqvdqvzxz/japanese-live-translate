@@ -76,7 +76,10 @@ against an attacker already executing code as the user.
 
 Opting into `persist_transcripts` creates `history.sqlite3` with mode 0600 in
 the Application Support directory, holding one row per session and one per
-translated line. The UI states plainly that this writes meeting content to
+translated line. The user also picks a folder, and each finished meeting is
+written there as a Markdown file named after the recording, mode 0600. The
+folder is chosen explicitly through the system picker, so meeting content
+lands somewhere the user decided rather than somewhere the app picked. The UI states plainly that this writes meeting content to
 disk, and offers "Delete all history" as well as deleting a single session.
 
 The cost of that default is visible rather than hidden: with saving off, the
@@ -84,8 +87,7 @@ History list holds only the session in progress and says so, offering to turn
 saving on. It does not quietly keep nothing.
 
 Summaries are generated only when the user asks, and the UI says that doing so
-sends the transcript to OpenAI again and costs money. Exports are likewise
-user-initiated — nothing is ever written out automatically.
+sends the transcript to OpenAI again and costs money.
 
 ### What the in-app notice says, and why
 

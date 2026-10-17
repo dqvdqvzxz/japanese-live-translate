@@ -269,6 +269,8 @@ class SessionRecord(BaseModel):
     #: Projection from published unit prices, not a billed amount.
     estimated_cost_usd: float = 0.0
     summary: SessionSummary | None = None
+    #: Where the readable transcript was written, if a folder is configured.
+    file_path: str | None = None
 
 
 class GlossaryEntry(BaseModel):

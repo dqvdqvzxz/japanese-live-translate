@@ -191,6 +191,7 @@ class SessionManager:
             self._dispatcher,
             settings.translation,
             glossary=lambda: self._settings_manager.glossary.entries,
+            on_settled=self._on_segment_settled,
             clock=self._clock,
         )
         await self._translations.start()
@@ -236,6 +237,7 @@ class SessionManager:
             self._capture_state = "stopped"
             if self.session_id:
                 self.history.end_session(_record_from_stats(stats, self.source))
+                self.history.write_transcript_file(self.session_id)
                 self._dispatcher.publish(
                     SessionStoppedEvent(session_id=self.session_id, stats=stats)
                 )
@@ -336,6 +338,11 @@ class SessionManager:
             return
         for segment in self._segments.add(transcript, self._clock()):
             self._enqueue(segment)
+
+    def _on_segment_settled(self, segment: Segment) -> None:
+        """Bring stored history up to date once a translation lands."""
+        if self.session_id:
+            self.history.update(self.session_id, segment)
 
     def _enqueue(self, segment: Segment) -> None:
         if self._translations is None:

@@ -325,3 +325,32 @@ async def test_an_injected_history_is_used_even_when_empty(tmp_path):
     )
     assert session.history is history
     assert session.history.persisting
+
+
+async def test_the_translation_is_persisted_not_just_the_japanese(tmp_path):
+    """History recorded the segment when it was queued and never again, so a
+    stored meeting kept its Japanese and lost every Vietnamese line."""
+    from jlt.history import HistoryManager
+
+    history = HistoryManager(persist=True, db_path=tmp_path / "history.sqlite3")
+    settings_manager = SettingsManager(tmp_path, api_key_present=True)
+    dispatcher = EventDispatcher()
+    recorder = Recorder(dispatcher)
+    stt = ScriptedStt()
+    session = SessionManager(
+        settings_manager,
+        dispatcher,
+        capture_factory=FakeCapture,
+        stt_factory=lambda _s: stt,
+        translation_factory=lambda _s: FakeTranslationProvider(),
+        history=history,
+    )
+
+    session_id = await session.start("app:x")
+    stt.emit(SttEvent(kind="final", item_id="i1", seq=1, text="来週のリリースは延期されません。"))
+    assert await wait_for(lambda: recorder.of("segment.translated"))
+    await session.stop()
+
+    stored = history.session_segments(session_id)
+    assert len(stored) == 1
+    assert stored[0].target_text, "the Vietnamese must survive into history"
