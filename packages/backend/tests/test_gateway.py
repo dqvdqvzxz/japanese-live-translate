@@ -353,3 +353,126 @@ def test_missing_api_key_is_identifiable(tmp_path):
     with TestClient(app) as local:
         body = local.post("/api/session/start", headers=AUTH, json={"source_id": "app:x"}).json()
     assert body["detail"]["code"] == "api_key_missing"
+
+
+# --- history API ------------------------------------------------------------
+
+
+def test_history_sessions_reports_whether_it_can_span_restarts(client):
+    """With saving off the list holds only the current session; the UI says so."""
+    body = client.get("/api/history/sessions", headers=AUTH).json()
+    assert body["persisting"] is False
+    assert body["sessions"] == []
+
+
+def test_a_finished_session_appears_in_the_list_with_its_cost(client):
+    client.post("/api/session/start", headers=AUTH, json={"source_id": "app:x"})
+    client.post("/api/session/stop", headers=AUTH)
+    sessions = client.get("/api/history/sessions", headers=AUTH).json()["sessions"]
+    assert len(sessions) == 1
+    assert sessions[0]["estimated_cost_usd"] is not None
+    assert sessions[0]["source_name"] == "Microsoft Teams"
+
+
+def test_session_detail_returns_stats_and_segments(client):
+    started = client.post("/api/session/start", headers=AUTH, json={"source_id": "app:x"}).json()[
+        "session_id"
+    ]
+    client.post("/api/session/stop", headers=AUTH)
+    body = client.get(f"/api/history/sessions/{started}", headers=AUTH).json()
+    assert body["session"]["session_id"] == started
+    assert isinstance(body["segments"], list)
+
+
+def test_an_unknown_session_is_a_typed_404(client):
+    body = client.get("/api/history/sessions/s_nope", headers=AUTH)
+    assert body.status_code == 404
+    assert body.json()["detail"]["code"] == "session_not_found"
+
+
+def test_export_returns_a_downloadable_file(client):
+    started = client.post("/api/session/start", headers=AUTH, json={"source_id": "app:x"}).json()[
+        "session_id"
+    ]
+    client.post("/api/session/stop", headers=AUTH)
+    response = client.get(f"/api/history/sessions/{started}/export?format=md", headers=AUTH)
+    assert response.status_code == 200
+    assert "attachment" in response.headers["content-disposition"]
+    assert response.headers["content-disposition"].endswith('.md"')
+    assert "# Meeting" in response.text
+
+
+def test_export_rejects_an_unknown_format(client):
+    response = client.get("/api/history/sessions/s_1/export?format=pdf", headers=AUTH)
+    assert response.status_code == 400
+    assert response.json()["detail"]["code"] == "unsupported_format"
+
+
+def test_summarising_a_running_session_is_refused(client):
+    """A recap of half a meeting is quietly incomplete, which is worse."""
+    started = client.post("/api/session/start", headers=AUTH, json={"source_id": "app:x"}).json()[
+        "session_id"
+    ]
+    response = client.post(f"/api/history/sessions/{started}/summary", headers=AUTH)
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] in ("session_running", "summary_unavailable")
+    client.post("/api/session/stop", headers=AUTH)
+
+
+def test_a_session_can_be_deleted(client):
+    started = client.post("/api/session/start", headers=AUTH, json={"source_id": "app:x"}).json()[
+        "session_id"
+    ]
+    client.post("/api/session/stop", headers=AUTH)
+    assert client.delete(f"/api/history/sessions/{started}", headers=AUTH).status_code == 200
+    assert client.get("/api/history/sessions", headers=AUTH).json()["sessions"] == []
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["/api/history/sessions", "/api/history/sessions/s_1", "/api/history/sessions/s_1/export"],
+)
+def test_history_routes_require_a_token(client, path):
+    assert client.get(path).status_code == 401
+
+
+def test_the_export_filename_is_readable_cross_origin(client):
+    """Cross-origin responses hide Content-Disposition unless it is exposed,
+    which silently reduced every export to a generic 'meeting.md'."""
+    response = client.get("/api/settings", headers={**AUTH, "Origin": "http://localhost:5173"})
+    exposed = response.headers.get("access-control-expose-headers", "")
+    assert "Content-Disposition" in exposed
+
+
+def test_export_suggests_a_dated_filename(client):
+    started = client.post("/api/session/start", headers=AUTH, json={"source_id": "app:x"}).json()[
+        "session_id"
+    ]
+    client.post("/api/session/stop", headers=AUTH)
+    disposition = client.get(
+        f"/api/history/sessions/{started}/export?format=md", headers=AUTH
+    ).headers["content-disposition"]
+    assert "meeting-" in disposition
+
+
+def test_the_whole_history_can_be_exported(client):
+    for _ in range(2):
+        client.post("/api/session/start", headers=AUTH, json={"source_id": "app:x"})
+        client.post("/api/session/stop", headers=AUTH)
+    response = client.get("/api/history/export?format=md", headers=AUTH)
+    assert response.status_code == 200
+    assert "# Meeting history" in response.text
+    assert "meeting-history-" in response.headers["content-disposition"]
+
+
+def test_exporting_an_empty_history_says_so(client):
+    response = client.get("/api/history/export?format=md", headers=AUTH)
+    assert response.status_code == 404
+    assert response.json()["detail"]["code"] == "history_empty"
+
+
+def test_the_export_route_is_not_mistaken_for_a_session_id(client):
+    """`/api/history/export` must not resolve as a session whose id is "export"."""
+    client.post("/api/session/start", headers=AUTH, json={"source_id": "app:x"})
+    client.post("/api/session/stop", headers=AUTH)
+    assert client.get("/api/history/export?format=md", headers=AUTH).status_code == 200

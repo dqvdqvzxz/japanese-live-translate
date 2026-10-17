@@ -30,7 +30,14 @@ backend process and handed to the renderer by the Rust shell. See
 | `POST` | `/api/session/resume` | — | `{"state":"running"}` |
 | `POST` | `/api/session/stop` | — | `{"state":"stopped","stats":SessionStats}` |
 | `GET` | `/api/session` | — | `SessionState` |
-| `GET` | `/api/history?limit=&session_id=` | — | `{"segments":[Segment]}` |
+| `GET` | `/api/history?limit=` | — | `{"segments":[Segment]}` — the session in progress |
+| `GET` | `/api/history/sessions?limit=` | — | `{"persisting":bool,"sessions":[SessionRecord]}`, newest first |
+| `GET` | `/api/history/sessions/{id}` | — | `{"session":SessionRecord,"segments":[Segment]}` |
+| `POST` | `/api/history/sessions/{id}/summary` | — | `SessionSummary` — generates it, costs money |
+| `GET` | `/api/history/sessions/{id}/export?format=md\|txt\|csv\|json` | — | the file, with `Content-Disposition` |
+| `GET` | `/api/history/export?format=…` | — | every session as one file |
+| `DELETE` | `/api/history/sessions/{id}` | — | `{"status":"deleted"}` |
+| `DELETE` | `/api/history` | — | `{"status":"cleared"}` |
 | `GET` | `/api/metrics` | — | `SessionStats` (measured latencies, usage, cost estimate) |
 | `POST` | `/api/glossary` | `{"entries":[{"ja":"...","vi":"...","note":"..."}]}` | `{"count":N}` |
 
@@ -46,7 +53,15 @@ never logged — see `docs/security.md` for the threat analysis.)
 
 The server closes with code `4401` if the token is missing or wrong.
 
-All messages are JSON objects with a `type` discriminator and a `ts` field
+Errors from `/api/*` carry a machine-readable code, because the UI has to act
+differently on each — open System Settings for `permission_denied`, open
+Settings for `api_key_missing` — and cannot decide that by matching on prose:
+
+```json
+{ "detail": { "code": "permission_denied", "message": "Screen Recording permission is required…" } }
+```
+
+All WebSocket messages are JSON objects with a `type` discriminator and a `ts` field
 (float, Unix seconds, backend clock). The canonical schema is
 `schemas/events.json`; the TypeScript mirror is
 `packages/desktop/src/types/events.ts` and the Python mirror is

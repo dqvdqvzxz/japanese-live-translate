@@ -241,6 +241,33 @@ class SttEvent(BaseModel):
     model_config = {"frozen": True}
 
 
+class SessionSummary(BaseModel):
+    """An AI-generated recap of a finished session."""
+
+    overview: str
+    #: Concrete things somebody has to do, as stated in the meeting.
+    action_items: list[str] = Field(default_factory=list)
+    generated_at: float = 0.0
+    model: str = ""
+
+
+class SessionRecord(BaseModel):
+    """A finished session, as it appears in the history list."""
+
+    session_id: str
+    started_at: float
+    ended_at: float | None = None
+    duration_s: float = 0.0
+    source_name: str = ""
+    segments_translated: int = 0
+    segments_failed: int = 0
+    audio_seconds_sent: float = 0.0
+    usage: Usage = Field(default_factory=Usage)
+    #: Projection from published unit prices, not a billed amount.
+    estimated_cost_usd: float = 0.0
+    summary: SessionSummary | None = None
+
+
 class GlossaryEntry(BaseModel):
     ja: str
     vi: str

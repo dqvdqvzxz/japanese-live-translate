@@ -60,7 +60,9 @@ async def run() -> int:
         # Start anyway: the user needs a running UI in order to enter a key.
         # Starting a capture session is refused until one exists.
         log.warning("no OPENAI_API_KEY present; capture will be refused")
-    capture_factory, stt_factory, translation_factory = default_factories(api_key, settings_manager)
+    capture_factory, stt_factory, translation_factory, summary_factory = default_factories(
+        api_key, settings_manager
+    )
 
     loop = asyncio.get_running_loop()
     session = SessionManager(
@@ -69,6 +71,7 @@ async def run() -> int:
         capture_factory=capture_factory,
         stt_factory=stt_factory,
         translation_factory=translation_factory,
+        summary_factory=summary_factory,
         history=history,
     )
 

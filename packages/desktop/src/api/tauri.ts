@@ -48,6 +48,18 @@ export async function setAlwaysOnTop(enabled: boolean): Promise<void> {
   await invoke("set_always_on_top", { enabled });
 }
 
+/**
+ * Write a file to ~/Downloads and return its path.
+ *
+ * The webview blocks ordinary blob downloads, so in the desktop app the
+ * native side writes the file. A fixed, predictable location beats a save
+ * dialog here: it needs no extra plugin and the user always knows where the
+ * export went.
+ */
+export async function saveToDownloads(filename: string, contents: string): Promise<string> {
+  return invoke<string>("save_to_downloads", { filename, contents });
+}
+
 /** Opens System Settings at Privacy & Security > Screen Recording. */
 export async function openScreenRecordingSettings(): Promise<void> {
   await invoke("open_screen_recording_settings");

@@ -227,7 +227,11 @@ export default function App() {
           />
         )}
         {panel === "history" && (
-          <HistoryPanel lines={state.lines} stats={state.stats} onClose={() => setPanel("none")} />
+          <HistoryPanel
+            client={client}
+            onClose={() => setPanel("none")}
+            onEnablePersistence={() => setPanel("settings")}
+          />
         )}
       </main>
 

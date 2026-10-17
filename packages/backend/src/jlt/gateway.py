@@ -18,7 +18,7 @@ import asyncio
 import contextlib
 from typing import Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, WebSocket
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ValidationError
@@ -27,6 +27,8 @@ from starlette.websockets import WebSocketDisconnect
 from . import __version__
 from .audio.capture_service import CaptureError, PermissionDenied
 from .events import EventDispatcher
+from .export import EXTENSIONS, MEDIA_TYPES, archive_filename, render, render_all
+from .export import filename as export_filename
 from .logging import get_logger
 from .models import GlossaryEntry
 from .secrets import Secret, token_matches
@@ -99,6 +101,10 @@ def create_app(
         allow_credentials=False,
         allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=["Authorization", "Content-Type"],
+        # Without this the renderer cannot read the filename the backend
+        # chose for an export: cross-origin responses only expose a handful
+        # of headers by default, and Content-Disposition is not one of them.
+        expose_headers=["Content-Disposition"],
         max_age=600,
     )
 
@@ -202,7 +208,104 @@ def create_app(
 
     @app.get("/api/history", dependencies=guard)
     async def history(limit: int = Query(default=200, ge=1, le=2000)) -> dict[str, Any]:
+        """Segments from the session in progress."""
         return {"segments": [s.model_dump() for s in session.history.recent(limit)]}
+
+    @app.get("/api/history/sessions", dependencies=guard)
+    async def list_sessions(
+        limit: int = Query(default=100, ge=1, le=1000),
+    ) -> dict[str, Any]:
+        """Finished sessions, newest first.
+
+        `persisting` tells the UI whether this list can span restarts; with
+        saving turned off it holds only the current session, and the UI says so
+        rather than looking broken.
+        """
+        return {
+            "persisting": session.history.persisting,
+            "sessions": [r.model_dump() for r in session.history.list_sessions(limit)],
+        }
+
+    @app.get("/api/history/export", dependencies=guard)
+    async def export_all(fmt: str = Query(default="md", alias="format")) -> Response:
+        """Export every stored session as one file.
+
+        Declared before the per-session route so `/export` is not mistaken for
+        a session id.
+        """
+        if fmt not in EXTENSIONS:
+            raise api_error(
+                400, "unsupported_format", f"Supported formats: {', '.join(EXTENSIONS)}."
+            )
+        records = session.history.list_sessions(limit=10_000)
+        if not records:
+            raise api_error(404, "history_empty", "There is nothing to export yet.")
+        bundle = [
+            (record, session.history.session_segments(record.session_id)) for record in records
+        ]
+        body = render_all(bundle, fmt)  # type: ignore[arg-type]
+        return Response(
+            content=body,
+            media_type=MEDIA_TYPES[fmt],
+            headers={
+                "Content-Disposition": (
+                    f'attachment; filename="{archive_filename(fmt)}"'  # type: ignore[arg-type]
+                )
+            },
+        )
+
+    @app.get("/api/history/sessions/{session_id}", dependencies=guard)
+    async def session_detail(session_id: str) -> dict[str, Any]:
+        record = session.history.get_session(session_id)
+        if record is None:
+            raise api_error(404, "session_not_found", "No such session in history.")
+        return {
+            "session": record.model_dump(),
+            "segments": [s.model_dump() for s in session.history.session_segments(session_id)],
+        }
+
+    @app.post("/api/history/sessions/{session_id}/summary", dependencies=guard)
+    async def summarize(session_id: str) -> dict[str, Any]:
+        record = session.history.get_session(session_id)
+        if record is None:
+            raise api_error(404, "session_not_found", "No such session in history.")
+        try:
+            summary = await session.summarize(session_id)
+        except SessionError as exc:
+            raise api_error(409, exc.code, str(exc)) from exc
+        except Exception as exc:
+            raise api_error(
+                502, "summary_failed", f"Could not generate a summary: {type(exc).__name__}"
+            ) from exc
+        return summary.model_dump()
+
+    @app.get("/api/history/sessions/{session_id}/export", dependencies=guard)
+    async def export_session(
+        session_id: str, fmt: str = Query(default="md", alias="format")
+    ) -> Response:
+        if fmt not in EXTENSIONS:
+            raise api_error(
+                400, "unsupported_format", f"Supported formats: {', '.join(EXTENSIONS)}."
+            )
+        record = session.history.get_session(session_id)
+        if record is None:
+            raise api_error(404, "session_not_found", "No such session in history.")
+        segments = session.history.session_segments(session_id)
+        body = render(record, segments, fmt)  # type: ignore[arg-type]
+        return Response(
+            content=body,
+            media_type=MEDIA_TYPES[fmt],
+            headers={
+                "Content-Disposition": (
+                    f'attachment; filename="{export_filename(record, fmt)}"'  # type: ignore[arg-type]
+                )
+            },
+        )
+
+    @app.delete("/api/history/sessions/{session_id}", dependencies=guard)
+    async def delete_session(session_id: str) -> dict[str, str]:
+        session.history.delete_session(session_id)
+        return {"status": "deleted"}
 
     @app.delete("/api/history", dependencies=guard)
     async def clear_history() -> dict[str, str]:

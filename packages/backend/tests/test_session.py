@@ -300,3 +300,28 @@ async def test_end_to_end_latency_includes_the_stt_stage(tmp_path):
     event = recorder.of("segment.translated")[0]
     assert event.e2e_latency_ms >= 500.0, "e2e must include the STT stage"
     await session.stop()
+
+
+async def test_an_injected_history_is_used_even_when_empty(tmp_path):
+    """HistoryManager defines __len__, so an empty one is falsy.
+
+    `history or HistoryManager()` therefore threw away the caller's instance,
+    database connection and all, and the app quietly persisted nothing while
+    the settings said it should.
+    """
+    from jlt.history import HistoryManager
+
+    history = HistoryManager(persist=True, db_path=tmp_path / "history.sqlite3")
+    assert len(history) == 0, "the empty case is the one that broke"
+
+    settings_manager = SettingsManager(tmp_path, api_key_present=True)
+    session = SessionManager(
+        settings_manager,
+        EventDispatcher(),
+        capture_factory=FakeCapture,
+        stt_factory=lambda _s: ScriptedStt(),
+        translation_factory=lambda _s: FakeTranslationProvider(),
+        history=history,
+    )
+    assert session.history is history
+    assert session.history.persisting

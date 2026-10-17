@@ -36,9 +36,11 @@ from .models import (
     CaptureState,
     ErrorEvent,
     Segment,
+    SessionRecord,
     SessionStartedEvent,
     SessionStats,
     SessionStoppedEvent,
+    SessionSummary,
     StatusEvent,
     SttState,
     Transcript,
@@ -51,6 +53,7 @@ from .stt.openai_realtime import OpenAIRealtimeSTTProvider
 from .stt.transcript_manager import TranscriptManager
 from .translation.provider import OpenAITranslationProvider
 from .translation.queue import TranslationQueue
+from .translation.summary import SummaryProvider
 
 log = get_logger(__name__)
 
@@ -61,6 +64,7 @@ STATUS_INTERVAL_S = 1.0
 CaptureFactory = Callable[[], AudioCapture]
 SttFactory = Callable[[Settings], SttProvider]
 TranslationFactory = Callable[[Settings], TranslationProvider]
+SummaryFactory = Callable[[Settings], SummaryProvider]
 
 
 class SessionError(RuntimeError):
@@ -79,6 +83,7 @@ class SessionManager:
         stt_factory: SttFactory,
         translation_factory: TranslationFactory,
         history: HistoryManager | None = None,
+        summary_factory: SummaryFactory | None = None,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._settings_manager = settings_manager
@@ -86,9 +91,14 @@ class SessionManager:
         self._capture_factory = capture_factory
         self._stt_factory = stt_factory
         self._translation_factory = translation_factory
+        self._summary_factory = summary_factory
         self._clock = clock
 
-        self.history = history or HistoryManager()
+        # Not `history or HistoryManager()`: HistoryManager defines __len__, so
+        # an empty one is falsy and that silently discarded the caller's
+        # instance — including its database connection — leaving the app
+        # persisting nothing while the settings said otherwise.
+        self.history = history if history is not None else HistoryManager()
         self.session_id: str | None = None
         self.source: AudioSource | None = None
         self._capture_state: CaptureState = "idle"
@@ -157,6 +167,7 @@ class SessionManager:
 
             self._set_capture_state("running")
             assert self.source is not None
+            self.history.begin_session(self.session_id, self.source.name, self._started_wall)
             self._dispatcher.publish(
                 SessionStartedEvent(session_id=self.session_id, source=self.source)
             )
@@ -224,6 +235,7 @@ class SessionManager:
             stats = await self._teardown()
             self._capture_state = "stopped"
             if self.session_id:
+                self.history.end_session(_record_from_stats(stats, self.source))
                 self._dispatcher.publish(
                     SessionStoppedEvent(session_id=self.session_id, stats=stats)
                 )
@@ -331,6 +343,29 @@ class SessionManager:
         if self._translations.submit(segment) and self.session_id:
             self.history.add(self.session_id, segment)
 
+    async def summarize(self, session_id: str) -> SessionSummary:
+        """Generate and store a recap for a finished session.
+
+        Refuses while that session is still running: summarising a meeting
+        halfway through produces a recap that is quietly incomplete, which is
+        worse than making the user wait for Stop.
+        """
+        if self._summary_factory is None:
+            raise SessionError("summary_unavailable", "Summaries are not configured.")
+        if self.active and session_id == self.session_id:
+            raise SessionError("session_running", "Stop the session before summarising it.")
+        segments = self.history.session_segments(session_id)
+        if not segments:
+            raise SessionError("nothing_to_summarize", "This session has no transcript.")
+
+        provider = self._summary_factory(self._settings_manager.settings)
+        try:
+            summary = await provider.summarize(segments)
+        finally:
+            await provider.aclose()
+        self.history.save_summary(session_id, summary)
+        return summary
+
     # -- reporting ----------------------------------------------------------
 
     def _publish_status(self, detail: str | None = None) -> None:
@@ -406,13 +441,28 @@ class SessionManager:
         )
 
 
+def _record_from_stats(stats: SessionStats, source: AudioSource | None) -> SessionRecord:
+    return SessionRecord(
+        session_id=stats.session_id,
+        started_at=stats.started_at,
+        ended_at=time.time(),
+        duration_s=stats.duration_s,
+        source_name=source.name if source else "",
+        segments_translated=stats.segments_translated,
+        segments_failed=stats.segments_failed,
+        audio_seconds_sent=stats.audio_seconds_sent,
+        usage=stats.usage,
+        estimated_cost_usd=stats.estimated_cost_usd or 0.0,
+    )
+
+
 # -- default factories -------------------------------------------------------
 
 
 def default_factories(
     api_key: Secret | None,
     settings_manager: SettingsManager,
-) -> tuple[CaptureFactory, SttFactory, TranslationFactory]:
+) -> tuple[CaptureFactory, SttFactory, TranslationFactory, SummaryFactory]:
     """Production wiring. Tests pass their own factories instead.
 
     `api_key` may be None so the app can start without one — the user needs a
@@ -440,4 +490,7 @@ def default_factories(
     def translation(settings: Settings) -> TranslationProvider:
         return OpenAITranslationProvider(require_key(), settings.translation)
 
-    return capture, stt, translation
+    def summary(settings: Settings) -> SummaryProvider:
+        return SummaryProvider(require_key(), settings.translation)
+
+    return capture, stt, translation, summary

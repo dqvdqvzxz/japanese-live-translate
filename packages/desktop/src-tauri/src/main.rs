@@ -96,6 +96,51 @@ fn set_always_on_top(window: tauri::Window, enabled: bool) -> Result<(), String>
     window.set_always_on_top(enabled).map_err(|e| e.to_string())
 }
 
+/// Write an exported transcript to ~/Downloads and return the path.
+///
+/// The webview blocks ordinary blob downloads, so the export has to be written
+/// natively. A fixed location is used rather than a save dialog: it needs no
+/// extra plugin, and the user always knows where the file went.
+///
+/// The filename comes from the backend, but it is reduced to its last path
+/// component here regardless — a name is not a path, and accepting one would
+/// let a crafted value write outside the Downloads folder.
+#[tauri::command]
+fn save_to_downloads(filename: String, contents: String) -> Result<String, String> {
+    let name = std::path::Path::new(&filename)
+        .file_name()
+        .ok_or("invalid filename")?
+        .to_string_lossy()
+        .to_string();
+
+    let downloads = std::path::PathBuf::from(home_dir()).join("Downloads");
+    std::fs::create_dir_all(&downloads).map_err(|e| e.to_string())?;
+
+    // Do not silently overwrite an earlier export of the same meeting.
+    let mut target = downloads.join(&name);
+    if target.exists() {
+        let path = std::path::Path::new(&name);
+        let stem = path
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| name.clone());
+        let extension = path
+            .extension()
+            .map(|s| format!(".{}", s.to_string_lossy()))
+            .unwrap_or_default();
+        for n in 2..1000 {
+            let candidate = downloads.join(format!("{stem} ({n}){extension}"));
+            if !candidate.exists() {
+                target = candidate;
+                break;
+            }
+        }
+    }
+
+    std::fs::write(&target, contents).map_err(|e| e.to_string())?;
+    Ok(target.to_string_lossy().to_string())
+}
+
 /// Open System Settings directly at Privacy & Security > Screen Recording.
 ///
 /// macOS requires this permission for ScreenCaptureKit even though the app
@@ -257,6 +302,7 @@ fn main() {
             clear_api_key,
             set_always_on_top,
             open_screen_recording_settings,
+            save_to_downloads,
             relaunch,
         ])
         .setup(|app| {

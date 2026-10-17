@@ -9,13 +9,50 @@
  * `api_key_present`. See docs/security.md §2.
  */
 
-import type { AudioSource, JltEvent, SessionStats } from "../types/events";
+import type { AudioSource, JltEvent, SessionStats, Usage } from "../types/events";
 import { isJltEvent } from "../types/events";
 import { backendInfo } from "./tauri";
 
 export interface BackendInfo {
   port: number;
   token: string;
+}
+
+export type ExportFormat = "md" | "txt" | "json" | "csv";
+
+export interface ExportedFile {
+  filename: string;
+  body: string;
+}
+
+export interface SessionSummary {
+  overview: string;
+  action_items: string[];
+  generated_at: number;
+  model: string;
+}
+
+export interface SessionRecord {
+  session_id: string;
+  started_at: number;
+  ended_at: number | null;
+  duration_s: number;
+  source_name: string;
+  segments_translated: number;
+  segments_failed: number;
+  audio_seconds_sent: number;
+  usage: Usage;
+  /** Projection from published unit prices, not a billed amount. */
+  estimated_cost_usd: number;
+  summary: SessionSummary | null;
+}
+
+export interface StoredSegment {
+  segment_id: string;
+  seq: number;
+  source_text: string;
+  target_text: string | null;
+  state: string;
 }
 
 export interface Settings {
@@ -128,6 +165,55 @@ export class BackendClient {
 
   stop(): Promise<{ state: string; stats: SessionStats }> {
     return this.request("/api/session/stop", { method: "POST" });
+  }
+
+  listSessions(): Promise<{ persisting: boolean; sessions: SessionRecord[] }> {
+    return this.request("/api/history/sessions");
+  }
+
+  sessionDetail(id: string): Promise<{ session: SessionRecord; segments: StoredSegment[] }> {
+    return this.request(`/api/history/sessions/${encodeURIComponent(id)}`);
+  }
+
+  summarize(id: string): Promise<SessionSummary> {
+    return this.request(`/api/history/sessions/${encodeURIComponent(id)}/summary`, {
+      method: "POST",
+    });
+  }
+
+  deleteSession(id: string): Promise<{ status: string }> {
+    return this.request(`/api/history/sessions/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+  }
+
+  /** One meeting. Returns the file and the name the backend suggests. */
+  exportSession(id: string, format: ExportFormat): Promise<ExportedFile> {
+    return this.download(
+      `/api/history/sessions/${encodeURIComponent(id)}/export?format=${format}`,
+      `meeting.${format}`,
+    );
+  }
+
+  /** Every stored meeting, as one file. */
+  exportAll(format: ExportFormat): Promise<ExportedFile> {
+    return this.download(
+      `/api/history/export?format=${format}`,
+      `meeting-history.${format}`,
+    );
+  }
+
+  private async download(path: string, fallbackName: string): Promise<ExportedFile> {
+    const response = await fetch(`${this.base}${path}`, {
+      headers: { Authorization: `Bearer ${this.info.token}` },
+    });
+    if (!response.ok) throw await ApiError.from(response);
+    // Readable only because the backend lists Content-Disposition in
+    // Access-Control-Expose-Headers; otherwise every export would fall back
+    // to the generic name.
+    const disposition = response.headers.get("content-disposition") ?? "";
+    const match = /filename="([^"]+)"/.exec(disposition);
+    return { filename: match?.[1] ?? fallbackName, body: await response.text() };
   }
 
   metrics(): Promise<SessionStats> {

@@ -1,25 +1,56 @@
 """Session history.
 
-In memory by default. Meeting content is only written to disk when the user
-explicitly opts in, and the UI says plainly that it is doing so
-(docs/security.md §4).
+In memory by default; on disk only when the user opts in. Meeting content is
+the most sensitive thing this application touches, so persistence stays an
+explicit choice and the UI says plainly what it means (docs/security.md §4).
 
-The in-memory store is a bounded ring: a 60-minute meeting produces a few
-hundred segments, but the bound is what makes an 8-hour session safe too.
+The consequence is visible in the product: with persistence off, the history
+list holds only the session you are in. That is the honest trade, and the UI
+offers to turn saving on rather than silently keeping nothing.
 """
 
 from __future__ import annotations
 
+import json
 import sqlite3
+import time
 from collections import deque
 from pathlib import Path
 
 from .logging import get_logger
-from .models import Segment
+from .models import Segment, SessionRecord, SessionSummary, Usage
 
 log = get_logger(__name__)
 
 MAX_IN_MEMORY = 2000
+
+_SCHEMA = """
+CREATE TABLE IF NOT EXISTS sessions (
+    session_id          TEXT PRIMARY KEY,
+    started_at          REAL NOT NULL,
+    ended_at            REAL,
+    duration_s          REAL NOT NULL DEFAULT 0,
+    source_name         TEXT NOT NULL DEFAULT '',
+    segments_translated INTEGER NOT NULL DEFAULT 0,
+    segments_failed     INTEGER NOT NULL DEFAULT 0,
+    audio_seconds_sent  REAL NOT NULL DEFAULT 0,
+    input_tokens        INTEGER NOT NULL DEFAULT 0,
+    output_tokens       INTEGER NOT NULL DEFAULT 0,
+    estimated_cost_usd  REAL NOT NULL DEFAULT 0,
+    summary_json        TEXT
+);
+CREATE TABLE IF NOT EXISTS segments (
+    session_id   TEXT NOT NULL,
+    segment_id   TEXT NOT NULL,
+    seq          INTEGER NOT NULL,
+    source_text  TEXT NOT NULL,
+    target_text  TEXT,
+    created_at   REAL NOT NULL,
+    PRIMARY KEY (session_id, segment_id)
+);
+CREATE INDEX IF NOT EXISTS segments_by_session ON segments (session_id, seq);
+CREATE INDEX IF NOT EXISTS sessions_by_date ON sessions (started_at DESC);
+"""
 
 
 class HistoryManager:
@@ -34,6 +65,7 @@ class HistoryManager:
         self._persist = persist
         self._db_path = db_path
         self._connection: sqlite3.Connection | None = None
+        self._current: SessionRecord | None = None
         if persist:
             self._open()
 
@@ -43,24 +75,59 @@ class HistoryManager:
             self._persist = False
             return
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._connection = sqlite3.connect(self._db_path)
+        self._connection = sqlite3.connect(self._db_path, check_same_thread=False)
+        self._connection.row_factory = sqlite3.Row
+        self._connection.executescript(_SCHEMA)
+        self._connection.commit()
+        # Meeting content on disk should at least be out of other users' reach.
+        self._db_path.chmod(0o600)
+
+    @property
+    def persisting(self) -> bool:
+        return self._connection is not None
+
+    # -- session lifecycle --------------------------------------------------
+
+    def begin_session(self, session_id: str, source_name: str, started_at: float) -> None:
+        self._segments.clear()
+        self._current = SessionRecord(
+            session_id=session_id, started_at=started_at, source_name=source_name
+        )
+        if self._connection is None:
+            return
         self._connection.execute(
-            """
-            CREATE TABLE IF NOT EXISTS segments (
-                session_id TEXT NOT NULL,
-                segment_id TEXT NOT NULL,
-                seq INTEGER NOT NULL,
-                source_text TEXT NOT NULL,
-                target_text TEXT,
-                created_at REAL NOT NULL,
-                PRIMARY KEY (session_id, segment_id)
-            )
-            """
+            "INSERT OR REPLACE INTO sessions (session_id, started_at, source_name) "
+            "VALUES (?, ?, ?)",
+            (session_id, started_at, source_name),
         )
         self._connection.commit()
-        # Meeting content on disk is readable by anyone with the file, so at
-        # minimum keep it out of other users' reach.
-        self._db_path.chmod(0o600)
+
+    def end_session(self, record: SessionRecord) -> None:
+        self._current = record
+        if self._connection is None:
+            return
+        self._connection.execute(
+            """
+            UPDATE sessions SET ended_at = ?, duration_s = ?, segments_translated = ?,
+                   segments_failed = ?, audio_seconds_sent = ?, input_tokens = ?,
+                   output_tokens = ?, estimated_cost_usd = ?
+            WHERE session_id = ?
+            """,
+            (
+                record.ended_at or time.time(),
+                record.duration_s,
+                record.segments_translated,
+                record.segments_failed,
+                record.audio_seconds_sent,
+                record.usage.input_tokens,
+                record.usage.output_tokens,
+                record.estimated_cost_usd,
+                record.session_id,
+            ),
+        )
+        self._connection.commit()
+
+    # -- segments -----------------------------------------------------------
 
     def add(self, session_id: str, segment: Segment) -> None:
         self._segments.append(segment)
@@ -79,15 +146,87 @@ class HistoryManager:
         )
         self._connection.commit()
 
+    def update(self, session_id: str, segment: Segment) -> None:
+        """Record a translation that arrived after the segment was stored."""
+        self.add(session_id, segment)
+
     def recent(self, limit: int = 200) -> list[Segment]:
         items = list(self._segments)[-limit:]
         return sorted(items, key=lambda s: s.seq)
 
+    # -- history ------------------------------------------------------------
+
+    def list_sessions(self, limit: int = 100) -> list[SessionRecord]:
+        """Finished sessions, newest first.
+
+        Without persistence this is just the session in progress, which is the
+        visible cost of not saving meeting content by default.
+        """
+        if self._connection is None:
+            return [self._current] if self._current else []
+        rows = self._connection.execute(
+            "SELECT * FROM sessions ORDER BY started_at DESC LIMIT ?", (limit,)
+        ).fetchall()
+        return [_record_from_row(row) for row in rows]
+
+    def get_session(self, session_id: str) -> SessionRecord | None:
+        if self._connection is None:
+            if self._current and self._current.session_id == session_id:
+                return self._current
+            return None
+        row = self._connection.execute(
+            "SELECT * FROM sessions WHERE session_id = ?", (session_id,)
+        ).fetchone()
+        return _record_from_row(row) if row else None
+
+    def session_segments(self, session_id: str) -> list[Segment]:
+        if self._connection is None:
+            if self._current and self._current.session_id == session_id:
+                return self.recent(limit=MAX_IN_MEMORY)
+            return []
+        rows = self._connection.execute(
+            "SELECT * FROM segments WHERE session_id = ? ORDER BY seq", (session_id,)
+        ).fetchall()
+        return [
+            Segment(
+                segment_id=row["segment_id"],
+                seq=row["seq"],
+                source_text=row["source_text"],
+                target_text=row["target_text"],
+                created_at=row["created_at"],
+                state="translated" if row["target_text"] else "failed",
+            )
+            for row in rows
+        ]
+
+    def save_summary(self, session_id: str, summary: SessionSummary) -> None:
+        if self._current and self._current.session_id == session_id:
+            self._current.summary = summary
+        if self._connection is None:
+            return
+        self._connection.execute(
+            "UPDATE sessions SET summary_json = ? WHERE session_id = ?",
+            (summary.model_dump_json(), session_id),
+        )
+        self._connection.commit()
+
+    def delete_session(self, session_id: str) -> None:
+        if self._current and self._current.session_id == session_id:
+            self._current = None
+            self._segments.clear()
+        if self._connection is None:
+            return
+        self._connection.execute("DELETE FROM segments WHERE session_id = ?", (session_id,))
+        self._connection.execute("DELETE FROM sessions WHERE session_id = ?", (session_id,))
+        self._connection.commit()
+
     def clear(self) -> None:
         """Forget everything, including anything written to disk."""
         self._segments.clear()
+        self._current = None
         if self._connection is not None:
             self._connection.execute("DELETE FROM segments")
+            self._connection.execute("DELETE FROM sessions")
             self._connection.commit()
 
     def close(self) -> None:
@@ -95,9 +234,27 @@ class HistoryManager:
             self._connection.close()
             self._connection = None
 
-    @property
-    def persisting(self) -> bool:
-        return self._connection is not None
-
     def __len__(self) -> int:
         return len(self._segments)
+
+
+def _record_from_row(row: sqlite3.Row) -> SessionRecord:
+    summary = None
+    if row["summary_json"]:
+        try:
+            summary = SessionSummary.model_validate(json.loads(row["summary_json"]))
+        except (json.JSONDecodeError, ValueError):
+            log.warning("stored summary is unreadable; ignoring it")
+    return SessionRecord(
+        session_id=row["session_id"],
+        started_at=row["started_at"],
+        ended_at=row["ended_at"],
+        duration_s=row["duration_s"],
+        source_name=row["source_name"],
+        segments_translated=row["segments_translated"],
+        segments_failed=row["segments_failed"],
+        audio_seconds_sent=row["audio_seconds_sent"],
+        usage=Usage(input_tokens=row["input_tokens"], output_tokens=row["output_tokens"]),
+        estimated_cost_usd=row["estimated_cost_usd"],
+        summary=summary,
+    )
