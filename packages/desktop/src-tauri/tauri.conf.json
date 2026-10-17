@@ -43,8 +43,9 @@
       "entitlements": "entitlements.plist"
     },
     "resources": {
-      "../../backend/dist/jlt-backend": "jlt-backend",
-      "../../audio-capture/.build/release/teams-audio-tap": "teams-audio-tap"
+      "../../backend/dist/jlt-backend": "jlt-backend-aarch64",
+      "../../backend/dist-x86/jlt-backend": "jlt-backend-x86_64",
+      "../../audio-capture/.build/universal/teams-audio-tap": "teams-audio-tap"
     }
   }
 }

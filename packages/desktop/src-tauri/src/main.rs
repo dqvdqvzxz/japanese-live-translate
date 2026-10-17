@@ -172,7 +172,16 @@ fn spawn_backend(app: &tauri::App) -> Result<(Child, BackendInfo), String> {
     // Python, no uv and no source checkout. Development: the uv environment,
     // located from the repo root rather than a relative path, because a
     // GUI-launched app does not inherit the shell's working directory.
-    let bundled = resource_dir.join("jlt-backend");
+    // Two backends ship side by side, one per architecture: a PyInstaller
+    // executable cannot be lipo'd into a universal binary, because only its
+    // Mach-O header would be merged while its embedded dylibs stay
+    // single-architecture.
+    let per_arch = resource_dir.join(format!("jlt-backend-{}", std::env::consts::ARCH));
+    let bundled = if per_arch.exists() {
+        per_arch
+    } else {
+        resource_dir.join("jlt-backend")
+    };
     let mut command = if bundled.exists() {
         ensure_executable(&bundled);
         Command::new(bundled)

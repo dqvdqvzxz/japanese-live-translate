@@ -13,7 +13,12 @@
 set -eu
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BUNDLE="$ROOT/packages/desktop/src-tauri/target/release/bundle"
+# A universal build lands under its own target directory.
+if [ "${UNIVERSAL:-0}" = "1" ]; then
+  BUNDLE="$ROOT/packages/desktop/src-tauri/target/universal-apple-darwin/release/bundle"
+else
+  BUNDLE="$ROOT/packages/desktop/src-tauri/target/release/bundle"
+fi
 APP="$BUNDLE/macos/Japanese Live Translator.app"
 ENTITLEMENTS="$ROOT/packages/desktop/src-tauri/entitlements.plist"
 VERSION="$(python3 -c "import json;print(json.load(open('$ROOT/packages/desktop/src-tauri/tauri.conf.json'))['version'])")"
@@ -25,6 +30,13 @@ DMG="$OUT/Japanese Live Translator $VERSION.dmg"
 # Sign the whole tree, including the backend and capture helper in Resources.
 # Without this the nested binaries keep their own signatures, the bundle is
 # internally inconsistent, and another Mac reports the app as damaged.
+echo "Architectures:"
+lipo -info "$APP/Contents/MacOS/Japanese Live Translator" | sed 's/^/  /'
+for RES in "$APP/Contents/Resources"/jlt-backend-* "$APP/Contents/Resources/teams-audio-tap"; do
+  [ -f "$RES" ] && printf '  %-24s %s\n' "$(basename "$RES")" "$(lipo -archs "$RES" 2>/dev/null || echo '?')"
+done
+echo
+
 echo "Signing (ad-hoc)…"
 codesign --force --deep --sign - --options runtime --entitlements "$ENTITLEMENTS" "$APP"
 codesign --verify --deep --strict "$APP"

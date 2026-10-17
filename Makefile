@@ -3,7 +3,7 @@ BACKEND := packages/backend
 CAPTURE := packages/audio-capture
 DESKTOP := packages/desktop
 
-.PHONY: help setup test lint backend dev bundle capture-build freeze-backend release capture-selftest stability verify-openai smoke-stt eval-translation clean doctor
+.PHONY: help setup test lint backend dev bundle capture-build capture-build-universal freeze-backend freeze-backend-x86 bundle-universal release release-universal capture-selftest stability verify-openai smoke-stt eval-translation clean doctor
 
 help:
 	@grep -E '^[a-z-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-18s %s\n", $$1, $$2}'
@@ -20,8 +20,18 @@ setup: ## Install dependencies for every package
 	cd $(DESKTOP) && npm install
 	$(MAKE) capture-build
 
-capture-build: ## Build the Swift audio helper
+capture-build: ## Build the Swift audio helper (current architecture)
 	cd $(CAPTURE) && swift build -c release
+
+capture-build-universal: ## Build the Swift helper for arm64 and x86_64
+	@mkdir -p $(CAPTURE)/.build/universal
+	cd $(CAPTURE) && swiftc -O -whole-module-optimization -target arm64-apple-macosx13.0 \
+		Sources/TeamsAudioTap/*.swift -o .build/universal/tap-arm64
+	cd $(CAPTURE) && swiftc -O -whole-module-optimization -target x86_64-apple-macosx13.0 \
+		Sources/TeamsAudioTap/*.swift -o .build/universal/tap-x86_64
+	cd $(CAPTURE) && lipo -create -output .build/universal/teams-audio-tap \
+		.build/universal/tap-arm64 .build/universal/tap-x86_64
+	@lipo -info $(CAPTURE)/.build/universal/teams-audio-tap
 
 capture-selftest: ## Record 10s from a source and write a WAV to listen to
 	./scripts/capture_selftest.sh $(SOURCE)
@@ -41,14 +51,23 @@ backend: ## Run the backend on its own (prints its port and token)
 dev: ## Run the full desktop app (Tauri spawns the backend itself)
 	cd $(DESKTOP) && npm run tauri dev
 
-freeze-backend: ## Freeze the backend into a standalone executable
+freeze-backend: ## Freeze the backend for this machine's architecture
 	cd $(BACKEND) && uv run pyinstaller --clean --noconfirm jlt-backend.spec
 
-bundle: capture-build freeze-backend ## Build a macOS .app and .dmg (self-contained)
+freeze-backend-x86: ## Freeze the backend for Intel, using an x86_64 Python
+	./scripts/freeze_backend_x86.sh
+
+bundle: capture-build freeze-backend ## Build a self-contained .app for this machine
 	cd $(DESKTOP) && npm run tauri build
+
+bundle-universal: capture-build-universal freeze-backend freeze-backend-x86 ## Build for Apple Silicon and Intel
+	cd $(DESKTOP) && npm run tauri build -- --target universal-apple-darwin
 
 release: bundle ## Build, sign ad-hoc and package a shareable .dmg into dist/
 	./scripts/package_release.sh
+
+release-universal: bundle-universal ## Same, but running on both architectures
+	UNIVERSAL=1 ./scripts/package_release.sh
 
 stability: ## Long-running stability check (make stability MINUTES=60)
 	./scripts/stability_run.sh $(MINUTES)
