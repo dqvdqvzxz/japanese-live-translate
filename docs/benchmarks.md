@@ -61,6 +61,40 @@ production provider. **n = 2. Indicative only.**
 | `commit` → `completed` | 682 ms, 685 ms |
 | Finals received | 2 of 2, in order, 0 duplicates |
 
+### Full pipeline — real audio through the real tap, 2026-10-17
+
+Captured system audio (`display:1`) through the Swift helper, VAD, live
+`gpt-live-transcribe` and live `gpt-5.4-mini`. **n = 6 utterances, 78 s.**
+
+| Metric | Measured | Target |
+|---|---|---|
+| `stt_latency_ms` (commit → final) | p50 **637 ms**, p95 837 ms | — |
+| `translation_latency_ms` | p50 **1250 ms**, p95 1332 ms | p50 < 3 s ✅ |
+| `e2e_latency_ms` (commit → Vietnamese on screen) | p50 **4120 ms**, p95 **4843 ms** | p95 < 8 s ✅ |
+| Utterances translated | 6 of 6, 0 failed | — |
+| Orphan processes after stop | 0 | 0 |
+| Cost | $0.0243 for 78 s | — |
+
+**The content of this run is not a valid Japanese test.** `display:1` captures
+all system audio, and unrelated Vietnamese speech was playing on the machine at
+the time, so what was transcribed was that, not the Japanese TTS that was also
+being played. The *timing* is a genuine measurement of the whole pipeline; the
+*transcription quality* says nothing about Japanese.
+
+#### Where the end-to-end time actually goes
+
+e2e p50 of 4120 ms against stt 637 ms plus translation 1250 ms leaves roughly
+**2.2 s unaccounted**, and it is not mysterious: short finals are held by the
+segment manager. Anything under `min_translate_chars` (8) waits up to
+`incomplete_flush_ms` (2500 ms) for a continuation before being released. Four
+of the six utterances were very short, so the hold dominated.
+
+That is the policy working as designed — it exists so two-word interjections
+are not translated alone — but it means **segmentation, not the API, is the
+largest term in end-to-end latency for short utterances.** Tuning
+`incomplete_flush_ms` is the highest-leverage knob, and it is a direct
+latency-versus-quality trade. This had not been obvious before measuring.
+
 ### Translation stage — `make eval-translation`
 
 All 18 golden cases, run serially with rolling context, exactly as the pipeline

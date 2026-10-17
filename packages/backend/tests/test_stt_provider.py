@@ -415,3 +415,55 @@ def test_backoff_resets_after_a_successful_connection():
         backoff.next_delay()
     backoff.reset()
     assert backoff.attempt == 0
+
+
+async def test_final_carries_the_commit_instant_for_end_to_end_latency():
+    """Without this, end-to-end latency starts at the final, not the commit.
+
+    That understates it by exactly the STT latency — an error in the flattering
+    direction, which is the worst kind in a benchmark.
+    """
+    socket = FakeWebSocket([FakeWebSocket.delta("item_1", "x")])
+    prov = provider(socket)
+    await prov.connect()
+    await collect(prov, 2)
+    await prov.commit(1)
+    socket.inbox.append(FakeWebSocket.completed("item_1", "x."))
+    final = (await collect(prov, 1))[0]
+    assert final.committed_at is not None
+    assert final.committed_at > 0
+    await prov.close()
+
+
+async def test_connect_waits_for_the_server_to_acknowledge_the_session():
+    """Streaming before the config is applied gets the first turn transcribed
+    under the server's defaults — observed live as non-Japanese output for the
+    first utterance of a session."""
+    socket = FakeWebSocket(acknowledge_session=False)
+    prov = provider(socket)
+    prov.SESSION_READY_TIMEOUT_S = 0.2
+    with pytest.raises(ConnectionError):
+        await prov.connect()
+
+
+async def test_a_rejected_session_fails_the_connection():
+    socket = FakeWebSocket(acknowledge_session=False)
+    socket.inbox.append(FakeWebSocket.error("invalid_request", "bad keyword"))
+    prov = provider(socket)
+    with pytest.raises(ConnectionError):
+        await prov.connect()
+
+
+async def test_transcripts_arriving_before_the_ack_are_not_lost():
+    socket = FakeWebSocket(acknowledge_session=False)
+    socket.inbox.extend(
+        [
+            FakeWebSocket.completed("item_0", "早い完了。"),
+            {"type": "session.created", "session": {"id": "s"}},
+        ]
+    )
+    prov = provider(socket)
+    await prov.connect()
+    events = await collect(prov, 2)
+    assert any(e.kind == "final" and e.text == "早い完了。" for e in events)
+    await prov.close()

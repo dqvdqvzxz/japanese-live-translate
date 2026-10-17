@@ -159,6 +159,9 @@ class SttStats:
 class OpenAIRealtimeSTTProvider:
     """A persistent transcription session with automatic reconnection."""
 
+    #: How long to wait for the server to acknowledge `session.update`.
+    SESSION_READY_TIMEOUT_S = 10.0
+
     def __init__(
         self,
         api_key: Secret,
@@ -218,6 +221,14 @@ class OpenAIRealtimeSTTProvider:
                     url, {"Authorization": f"Bearer {self._api_key.reveal()}"}
                 )
                 await socket.send(json.dumps(build_session_update(self._settings, self._glossary)))
+                # Wait for the server to acknowledge the session before any
+                # audio is allowed through. Streaming immediately after `send`
+                # races the configuration: a first turn arriving before
+                # `languages: ["ja"]` is applied gets transcribed under the
+                # server's defaults. Observed live — the first utterance of a
+                # session came back as non-Japanese nonsense while every later
+                # one was correct.
+                await self._await_session_ready(socket)
                 self._socket = socket
                 self._resolved_url = url
                 self._closing = False
@@ -237,6 +248,37 @@ class OpenAIRealtimeSTTProvider:
             "Could not open a transcription session on any candidate URL. "
             "Run `make verify-openai` to determine the correct endpoint."
         ) from last_error
+
+    async def _await_session_ready(self, socket: WebSocketLike) -> None:
+        """Block until the server confirms the transcription session.
+
+        Transcript events seen while waiting are handled normally rather than
+        discarded, so nothing is lost in the gap before the read loop starts.
+        """
+        deadline = time.monotonic() + self.SESSION_READY_TIMEOUT_S
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("the server did not acknowledge the transcription session")
+            raw = await asyncio.wait_for(socket.recv(), timeout=remaining)
+            try:
+                event = json.loads(raw if isinstance(raw, str) else raw.decode("utf-8"))
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                continue
+            if not isinstance(event, dict):
+                continue
+            kind = str(event.get("type", ""))
+            if kind == "error":
+                detail = event.get("error", {})
+                message = (
+                    detail.get("message", "session rejected")
+                    if isinstance(detail, dict)
+                    else "session rejected"
+                )
+                raise ConnectionError(f"transcription session rejected: {message}")
+            if kind.startswith("session."):
+                return
+            self._handle_event(event)
 
     async def close(self) -> None:
         self._closing = True
@@ -365,11 +407,10 @@ class OpenAIRealtimeSTTProvider:
             turn = self._turn_for(item_id)
             self._finalized_items.add(item_id)
             text = str(event.get("transcript", turn.text))
-            latency = None
-            if turn.committed_at is not None:
-                latency = (time.monotonic() - turn.committed_at) * 1000.0
-            elif self._pending_commit_at is not None:
-                latency = (time.monotonic() - self._pending_commit_at) * 1000.0
+            committed_at = turn.committed_at or self._pending_commit_at
+            latency = (
+                (time.monotonic() - committed_at) * 1000.0 if committed_at is not None else None
+            )
             self.stats.finals += 1
             self._turns.pop(item_id, None)
             self._emit(
@@ -379,6 +420,7 @@ class OpenAIRealtimeSTTProvider:
                     seq=turn.seq,
                     text=text,
                     latency_ms=latency,
+                    committed_at=committed_at,
                 )
             )
             return

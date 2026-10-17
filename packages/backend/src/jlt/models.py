@@ -231,6 +231,10 @@ class SttEvent(BaseModel):
     text: str = ""
     #: commit → completed, in milliseconds. Only set on `final`.
     latency_ms: float | None = None
+    #: Monotonic instant the turn was committed. Carried through so end-to-end
+    #: latency is measured from when the audio turn closed, not from when its
+    #: transcript happened to arrive.
+    committed_at: float | None = None
     code: str = ""
     message: str = ""
 

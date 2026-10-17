@@ -277,3 +277,26 @@ async def test_stats_report_no_samples_rather_than_zero(tmp_path):
 async def test_settings_are_defaults_when_none_are_stored(tmp_path):
     manager = SettingsManager(tmp_path)
     assert manager.settings == Settings(api_key_present=False)
+
+
+async def test_end_to_end_latency_includes_the_stt_stage(tmp_path):
+    """e2e must be measured from the commit, so it is never below stt latency."""
+    import time
+
+    session, recorder, _, stt = build(tmp_path)
+    await session.start("app:x")
+    committed = time.monotonic() - 0.5  # as if the turn closed 500 ms ago
+    stt.emit(
+        SttEvent(
+            kind="final",
+            item_id="i1",
+            seq=1,
+            text="来週のリリースは延期されません。",
+            latency_ms=500.0,
+            committed_at=committed,
+        )
+    )
+    assert await wait_for(lambda: recorder.of("segment.translated"))
+    event = recorder.of("segment.translated")[0]
+    assert event.e2e_latency_ms >= 500.0, "e2e must include the STT stage"
+    await session.stop()

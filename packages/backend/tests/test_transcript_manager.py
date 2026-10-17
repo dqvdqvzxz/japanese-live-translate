@@ -110,3 +110,11 @@ def test_published_events_never_carry_the_session_of_another_session():
     manager, recorder, _ = build()
     manager.handle(SttEvent(kind="final", item_id="i1", seq=1, text="x"))
     assert all(e.session_id == "s_1" for e in recorder.events)
+
+
+def test_commit_instant_reaches_the_segment_sink():
+    manager, _, finals = build()
+    manager.handle(
+        SttEvent(kind="final", item_id="i1", seq=1, text="確認します。", committed_at=123.5)
+    )
+    assert finals[0].committed_at == 123.5

@@ -89,16 +89,25 @@ class FakeWebSocket:
     class Disconnect(Exception):
         pass
 
-    def __init__(self, inbox: list[object] | None = None) -> None:
+    def __init__(
+        self, inbox: list[object] | None = None, *, acknowledge_session: bool = True
+    ) -> None:
         self.inbox: list[object] = list(inbox or [])
         self.sent: list[dict] = []
         self.closed = False
-        self._idle = asyncio.Event()
+        # The real server answers `session.update` with `session.created`, and
+        # the client refuses to stream audio until it does. A fake that skipped
+        # the acknowledgement would let a client pass that deadlocks in
+        # production.
+        self._acknowledge_session = acknowledge_session
 
     async def send(self, message: str) -> None:
         if self.closed:
             raise ConnectionError("socket closed")
-        self.sent.append(json.loads(message))
+        payload = json.loads(message)
+        self.sent.append(payload)
+        if self._acknowledge_session and payload.get("type") == "session.update":
+            self.inbox.insert(0, {"type": "session.created", "session": {"id": "sess_fake"}})
 
     async def recv(self) -> str:
         while True:

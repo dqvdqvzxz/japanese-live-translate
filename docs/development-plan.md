@@ -56,7 +56,7 @@ could not be executed here are marked pending, not assumed.
 | Opens a capture stream on Teams and emits aligned 24 kHz mono PCM16 | ✅ — 7.64 s captured, 382 frames, 0 dropped |
 | Graceful SIGINT stop, clean exit, no orphan process | ✅ |
 | Carries an **audible** signal through the system-audio (display) filter | ✅ peak 7517, −32.7 dBFS |
-| Carries an audible signal through the **per-application** filter | ⛔ manual — needs Teams actually playing sound |
+| Carries an audible signal through the **per-application** filter | ✅ Teams test call: peak 25053, −23.7 dBFS |
 | 30-minute continuous capture | ⛔ manual |
 
 **Acceptance: PARTIALLY MET.** The tap demonstrably captures real audio: a
@@ -250,6 +250,8 @@ benchmarks, 60-minute run, packaging, docs.
 | 2026-10-17 | Phase 5 lint + types | `ruff`, `mypy --strict`, `eslint`, `tsc`, `cargo clippy -D warnings`, `cargo fmt --check` | All clean |
 | 2026-10-17 | Live backend process | `python -m jlt` + curl | ✅ handshake, auth, origin, loopback-only bind, no key leak |
 | 2026-10-17 | Live session on real Teams | `POST /api/session/start` then `/stop` | ✅ helper spawned, STT connected, `no_audio` warning correct, **0 orphans and 0 sockets after stop** |
+| 2026-10-17 | Per-application Teams capture | helper, Teams test call, 5.7 s | ✅ **peak 25053, −23.7 dBFS** — the Electron-helper concern was unfounded |
+| 2026-10-17 | Full pipeline, real audio + live OpenAI | 78 s session | ✅ 6/6 translated, 0 failed, 0 orphans; stt p50 637 ms, translate p50 1250 ms, e2e p50 4120 ms / p95 4843 ms. Content invalid (captured unrelated system audio) |
 | 2026-10-17 | Audible capture (display filter) | helper + `afplay`, 6.08 s | ✅ **peak 7517, RMS −32.7 dBFS** — real audio, not a shaped silent stream |
 | 2026-10-17 | Helper JSON key set | `--list-sources` across 36 sources | ✅ after fixing Swift to emit explicit nulls; previously `bundle_id`/`pid` were omitted for displays |
 | 2026-10-16 | Live Teams capture | `--capture app:com.microsoft.teams2`, 8 s | 366,720 bytes = 7.64 s at 24 kHz mono 16-bit; 382 frames; **0 dropped**; clean SIGINT exit 0. **Signal was silent (peak 0)** — Teams had no audio playing. Audibility remains unverified. |
@@ -259,9 +261,13 @@ advance.
 
 ## Open issues
 
-1. **The per-application capture filter has not been shown to carry audio.**
-   System-audio capture is verified to produce real signal; the Teams-specific
-   filter has only been run against a silent Teams. See Phase 1 for the check.
+1. **No clean Japanese end-to-end run yet.** The pipeline has been measured on
+   real audio (see `docs/benchmarks.md`), but that run captured unrelated
+   system audio rather than Japanese. A valid content test needs Japanese
+   audio playing with nothing else making sound.
+2. **Segmentation dominates end-to-end latency for short utterances** —
+   roughly 2.2 s of the 4.1 s p50. `incomplete_flush_ms` is the knob; it is a
+   latency-versus-quality trade and needs tuning against real meeting speech.
 2. **Spoken identifiers do not survive STT as written identifiers.**
    Confirmed live. Must be handled in Phase 3 by the translation prompt plus a
    deterministic normalisation pass, with the case in the golden dataset.

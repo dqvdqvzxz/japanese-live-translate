@@ -115,6 +115,7 @@ class TranscriptManager:
                     seq=event.seq,
                     text=text,
                     is_final=True,
+                    committed_at=event.committed_at or 0.0,
                 )
             )
 
