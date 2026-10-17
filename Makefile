@@ -3,7 +3,7 @@ BACKEND := packages/backend
 CAPTURE := packages/audio-capture
 DESKTOP := packages/desktop
 
-.PHONY: help setup test lint backend dev bundle capture-build capture-selftest verify-openai smoke-stt eval-translation clean doctor
+.PHONY: help setup test lint backend dev bundle capture-build freeze-backend capture-selftest stability verify-openai smoke-stt eval-translation clean doctor
 
 help:
 	@grep -E '^[a-z-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-18s %s\n", $$1, $$2}'
@@ -41,8 +41,14 @@ backend: ## Run the backend on its own (prints its port and token)
 dev: ## Run the full desktop app (Tauri spawns the backend itself)
 	cd $(DESKTOP) && npm run tauri dev
 
-bundle: ## Build a macOS .app and .dmg
+freeze-backend: ## Freeze the backend into a standalone executable
+	cd $(BACKEND) && uv run pyinstaller --clean --noconfirm jlt-backend.spec
+
+bundle: capture-build freeze-backend ## Build a macOS .app and .dmg (self-contained)
 	cd $(DESKTOP) && npm run tauri build
+
+stability: ## Long-running stability check (make stability MINUTES=60)
+	./scripts/stability_run.sh $(MINUTES)
 
 verify-openai: ## Probe the live OpenAI API (requires OPENAI_API_KEY)
 	cd $(BACKEND) && uv run --env-file ../../.env python ../../scripts/verify_openai.py

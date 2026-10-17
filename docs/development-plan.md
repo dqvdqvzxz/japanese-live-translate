@@ -216,9 +216,56 @@ supervisor handshake are unexercised, and the UI falls back to the mock
 stream.
 
 ## Phase 6 — Testing and release
-Real Teams testing, browser audio, headphones, network interruption, latency
-benchmarks, 60-minute run, packaging, docs.
-**Acceptance:** `docs/benchmarks.md` filled from measured runs only.
+
+| Task | Status |
+|---|---|
+| Test against real Microsoft Teams | ✅ capture verified, peak 25053 |
+| Test browser audio | ⛔ manual — needs audio actually playing in a browser |
+| Test with headphones | ⛔ manual — hardware |
+| Network interruption and reconnection | ✅ 6 tests against a real local WebSocket server |
+| Latency benchmarks | ✅ recorded in `docs/benchmarks.md` |
+| 60-minute continuous run | 🟡 in progress — `make stability MINUTES=60` |
+| Package a macOS application | ✅ self-contained `.app` (24.3 MB) and `.dmg` (20.6 MB) |
+| Installation and usage documentation | ✅ `docs/installation.md` |
+| Code signing and notarization | ⛔ needs an Apple Developer ID |
+
+**Acceptance: PARTIALLY MET.** Everything that can be verified on this machine
+without another person in a meeting is verified.
+
+### Packaging
+
+`make bundle` now produces a genuinely self-contained app: it builds the Swift
+helper, freezes the backend with PyInstaller into a 12 MB standalone binary,
+and copies both into `Contents/Resources/`. Verified by launching the bundle
+with `PATH=/usr/bin:/bin` — no Python, no `uv`, no source checkout — and
+watching the bundled backend come up and serve `/health`.
+
+The app is unsigned and Apple Silicon only.
+
+### Process cleanup — all three exit paths
+
+A real bug was found here. The Rust shell killed the backend on the window's
+`Destroyed` event, which does not fire on a SIGTERM or a crash. The first
+packaged build left an **orphaned backend** after the app exited, which would
+have kept the capture helper alive and kept capturing after the user believed
+they had closed the app.
+
+Fixed in two layers, because only the second survives a SIGKILL: the shell now
+also handles `RunEvent::Exit`, and the backend independently watches
+`JLT_PARENT_PID` and exits when that process disappears.
+
+| Exit path | app | backend | helper |
+|---|---|---|---|
+| Normal quit (`osascript quit`) | 0 | 0 | 0 |
+| `SIGKILL` on the app | 0 | 0 | 0 |
+| Supervisor dies with no cleanup chance | — | 0 | 0 |
+
+### Known environment trap
+
+`uv run --env-file <path>` splits its value on whitespace to accept several
+files, so an **absolute path containing a space** is silently truncated. This
+project's own path contains one. Scripts source `.env` into the environment
+instead; the Makefile's relative `--env-file ../../.env` is unaffected.
 
 ---
 
@@ -250,6 +297,9 @@ benchmarks, 60-minute run, packaging, docs.
 | 2026-10-17 | Phase 5 lint + types | `ruff`, `mypy --strict`, `eslint`, `tsc`, `cargo clippy -D warnings`, `cargo fmt --check` | All clean |
 | 2026-10-17 | Live backend process | `python -m jlt` + curl | ✅ handshake, auth, origin, loopback-only bind, no key leak |
 | 2026-10-17 | Live session on real Teams | `POST /api/session/start` then `/stop` | ✅ helper spawned, STT connected, `no_audio` warning correct, **0 orphans and 0 sockets after stop** |
+| 2026-10-17 | Reconnect over a real socket | `pytest tests/test_reconnect_integration.py` | ✅ 6 passed — connect, configure, drop, reconnect, reconfigure, audio resumes, silent-server timeout |
+| 2026-10-17 | macOS packaging | `make bundle` | ✅ `.app` 24.3 MB, `.dmg` 20.6 MB, self-contained; runs with `PATH=/usr/bin:/bin` |
+| 2026-10-17 | Orphan processes on exit | normal quit, SIGKILL, supervisor death | ✅ 0 orphans on all three **after** fixing a real orphaned-backend bug |
 | 2026-10-17 | UI against the real backend | browser at `localhost:5173` + live backend | ✅ real sources listed, session started from the UI, helper spawned, STT connected, clean stop. Found and fixed: missing CORS headers, a stale placeholder, and the source selector not adopting a running session |
 | 2026-10-17 | Per-application Teams capture | helper, Teams test call, 5.7 s | ✅ **peak 25053, −23.7 dBFS** — the Electron-helper concern was unfounded |
 | 2026-10-17 | Full pipeline, real audio + live OpenAI | 78 s session | ✅ 6/6 translated, 0 failed, 0 orphans; stt p50 637 ms, translate p50 1250 ms, e2e p50 4120 ms / p95 4843 ms. Content invalid (captured unrelated system audio) |

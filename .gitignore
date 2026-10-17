@@ -31,3 +31,7 @@ packages/desktop/dist/
 
 # Rust / Tauri build output
 packages/desktop/src-tauri/target/
+
+# PyInstaller output
+packages/backend/build/
+packages/backend/dist/

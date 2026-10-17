@@ -85,3 +85,66 @@ def test_audio_persistence_cannot_be_enabled_by_config():
     PrivacySettings(persist_audio=False)
     with pytest.raises(ValidationError):
         PrivacySettings(persist_audio=True)
+
+
+def test_backend_exits_when_its_supervisor_dies():
+    """An orphaned backend would keep capturing after the app was closed.
+
+    The Tauri shell kills the child on a normal quit, but a SIGKILL or a crash
+    gives it no chance, so the child watches the parent too.
+    """
+    import os
+    import subprocess
+    import sys
+    import time
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    # A throwaway parent we can kill abruptly.
+    parent = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    try:
+        env = {k: v for k, v in os.environ.items() if k != "OPENAI_API_KEY"}
+        env.update(
+            JLT_PARENT_PID=str(parent.pid),
+            JLT_CONFIG_DIR="/tmp/jlt-watchdog-test",
+            PYTHONPATH=str(root / "src"),
+        )
+        with subprocess.Popen(
+            [sys.executable, "-m", "jlt"],
+            cwd=root,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        ) as backend:
+            try:
+                assert backend.stdout is not None
+                # Wait for the handshake, so we know it is fully up.
+                assert '"listening"' in backend.stdout.readline()
+
+                parent.kill()
+                parent.wait()
+
+                deadline = time.monotonic() + 20.0
+                while time.monotonic() < deadline and backend.poll() is None:
+                    time.sleep(0.25)
+                assert backend.poll() is not None, "backend outlived its supervisor"
+            finally:
+                if backend.poll() is None:
+                    backend.kill()
+    finally:
+        if parent.poll() is None:
+            parent.kill()
+            parent.wait()
+
+
+async def test_watchdog_is_inert_without_a_declared_parent(monkeypatch):
+    """Running the backend from a shell or a test harness must be unaffected."""
+    import asyncio
+
+    from jlt.__main__ import _watch_parent
+
+    monkeypatch.delenv("JLT_PARENT_PID", raising=False)
+    stopping = asyncio.Event()
+    await asyncio.wait_for(_watch_parent(stopping), timeout=1.0)
+    assert not stopping.is_set()

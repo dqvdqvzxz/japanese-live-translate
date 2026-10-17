@@ -106,18 +106,48 @@ fn spawn_backend(app: &tauri::App) -> Result<(Child, BackendInfo), String> {
         .resource_dir()
         .map_err(|e| format!("no resource dir: {e}"))?;
 
-    // Packaged: a bundled executable. Development: the uv-managed environment.
+    // Packaged: the frozen backend shipped in Resources, which needs no
+    // Python, no uv and no source checkout. Development: the uv environment,
+    // located from the repo root rather than a relative path, because a
+    // GUI-launched app does not inherit the shell's working directory.
     let bundled = resource_dir.join("jlt-backend");
     let mut command = if bundled.exists() {
+        ensure_executable(&bundled);
         Command::new(bundled)
     } else {
+        let repo = repo_root().ok_or("not running from a source checkout")?;
         let mut dev = Command::new("uv");
         dev.args(["run", "python", "-m", "jlt"]);
-        dev.current_dir("../../backend");
+        dev.current_dir(repo.join("packages/backend"));
         dev
     };
 
+    // A GUI-launched app gets a minimal PATH that excludes Homebrew and
+    // rustup, so `uv` would not be found. Harmless for the frozen backend.
+    if let Ok(path) = std::env::var("PATH") {
+        command.env(
+            "PATH",
+            format!(
+                "{path}:/opt/homebrew/bin:/usr/local/bin:{}/.local/bin",
+                home_dir()
+            ),
+        );
+    }
+
+    // Point the backend at the bundled capture helper when there is one;
+    // otherwise it falls back to its own discovery of the build directory.
+    let helper = resource_dir.join("teams-audio-tap");
+    if helper.exists() {
+        ensure_executable(&helper);
+        command.env("JLT_AUDIO_HELPER", &helper);
+    }
+
     command.stdout(Stdio::piped()).stderr(Stdio::inherit());
+
+    // Let the backend watch us. Killing it on quit (below) covers the normal
+    // path, but a SIGKILL or a crash gives us no chance to run anything, and
+    // an orphaned backend would keep capturing after the user closed the app.
+    command.env("JLT_PARENT_PID", std::process::id().to_string());
 
     // The key reaches the child through its environment, never through argv.
     if let Some(key) = read_api_key() {
@@ -145,6 +175,47 @@ fn spawn_backend(app: &tauri::App) -> Result<(Child, BackendInfo), String> {
             token: handshake.token,
         },
     ))
+}
+
+/// Terminate the backend child, if one is still ours to terminate.
+fn kill_backend(handle: &tauri::AppHandle) {
+    let child = handle.state::<AppState>().child.lock().unwrap().take();
+    if let Some(mut child) = child {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+}
+
+fn home_dir() -> String {
+    std::env::var("HOME").unwrap_or_default()
+}
+
+/// Resource copying does not always preserve the executable bit, and a
+/// backend that cannot be executed produces a baffling "spawn failed".
+fn ensure_executable(path: &std::path::Path) {
+    use std::os::unix::fs::PermissionsExt;
+    if let Ok(metadata) = std::fs::metadata(path) {
+        let mode = metadata.permissions().mode();
+        if mode & 0o111 == 0 {
+            let mut permissions = metadata.permissions();
+            permissions.set_mode(mode | 0o755);
+            let _ = std::fs::set_permissions(path, permissions);
+        }
+    }
+}
+
+/// Walk up from the executable looking for the monorepo root.
+///
+/// Used only in development. Counting parent directories breaks as soon as
+/// the binary moves between `target/debug` and `target/release`.
+fn repo_root() -> Option<std::path::PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    for ancestor in exe.ancestors() {
+        if ancestor.join("packages/backend/pyproject.toml").is_file() {
+            return Some(ancestor.to_path_buf());
+        }
+    }
+    None
 }
 
 fn main() {
@@ -183,14 +254,16 @@ fn main() {
                 // The handle is cloned rather than borrowed from `window`:
                 // `State` borrows its owner, and the window reference here does
                 // not outlive the lock guard.
-                let handle = window.app_handle().clone();
-                let child = handle.state::<AppState>().child.lock().unwrap().take();
-                if let Some(mut child) = child {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                }
+                kill_backend(&window.app_handle().clone());
             }
         })
-        .run(tauri::generate_context!())
-        .expect("failed to start Japanese Live Translator");
+        .build(tauri::generate_context!())
+        .expect("failed to start Japanese Live Translator")
+        .run(|handle, event| {
+            // Window Destroyed does not fire on every exit path — a SIGTERM
+            // from the system, for instance. Exit does, so both are handled.
+            if let tauri::RunEvent::Exit = event {
+                kill_backend(handle);
+            }
+        });
 }

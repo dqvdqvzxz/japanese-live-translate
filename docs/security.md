@@ -92,6 +92,11 @@ permits sending audio to a third-party API; the first-run dialog says so.
 
 - Capture requires an explicit Start. There is no autostart, no "start on
   launch", and no hidden hotkey that begins capture.
+- Closing the app ends capture. The shell kills the backend on quit, and the
+  backend independently watches its supervisor (`JLT_PARENT_PID`) and exits if
+  that process disappears. Both exist because only the second survives a
+  SIGKILL or a crash, and a backend that outlived the window would keep
+  capturing after the user believed they had stopped.
 - The capture indicator is always visible in the window; the status bar shows
   `capture` and `stt` states and a live audio level meter, so a user can always
   tell whether audio is leaving the machine.

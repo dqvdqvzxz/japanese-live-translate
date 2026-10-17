@@ -101,7 +101,10 @@ async def run() -> int:
         with contextlib.suppress(NotImplementedError):
             loop.add_signal_handler(sig, stopping.set)
 
+    watchdog = asyncio.create_task(_watch_parent(stopping), name="parent-watchdog")
+
     await stopping.wait()
+    watchdog.cancel()
     log.info("shutting down")
 
     # Stop the session before the server so capture and the helper process are
@@ -115,6 +118,36 @@ async def run() -> int:
     with contextlib.suppress(asyncio.TimeoutError):
         await asyncio.wait_for(serve_task, timeout=10.0)
     return 0
+
+
+async def _watch_parent(stopping: asyncio.Event) -> None:
+    """Exit when the supervising process goes away.
+
+    The Tauri shell kills this child on a normal quit, but that cannot be
+    relied on: a SIGKILL, a crash or a force-quit leaves no opportunity to run
+    cleanup, and an orphaned backend would keep the audio helper alive and keep
+    capturing. Capturing after the user closed the app is the single worst
+    failure this program could have, so the child watches the parent too.
+
+    Only active when the supervisor identifies itself, so running the backend
+    directly from a shell or a test harness is unaffected.
+    """
+    raw = os.environ.get("JLT_PARENT_PID")
+    if not raw or not raw.isdigit():
+        return
+    parent = int(raw)
+    log = jlt_logging.get_logger("jlt")
+    while not stopping.is_set():
+        await asyncio.sleep(2.0)
+        try:
+            os.kill(parent, 0)
+        except ProcessLookupError:
+            log.warning("supervisor exited; shutting down", extra={"parent": parent})
+            stopping.set()
+            return
+        except PermissionError:
+            # Still alive, just not ours to signal.
+            continue
 
 
 async def _wait_for_port(server: uvicorn.Server, timeout_s: float = 15.0) -> int | None:
