@@ -354,3 +354,23 @@ async def test_the_translation_is_persisted_not_just_the_japanese(tmp_path):
     stored = history.session_segments(session_id)
     assert len(stored) == 1
     assert stored[0].target_text, "the Vietnamese must survive into history"
+
+
+async def test_the_heartbeat_reports_counters_and_no_content(tmp_path, caplog):
+    """ "Capturing but no text" is undiagnosable without this, and a log that
+    leaked the transcript to diagnose it would be worse than the bug."""
+    import logging
+
+    session, _, _, stt = build(tmp_path)
+    await session.start("app:x")
+    stt.emit(SttEvent(kind="final", item_id="i1", seq=1, text="機密の会議内容です。"))
+    await asyncio.sleep(0.1)
+
+    with caplog.at_level(logging.INFO, logger="jlt.session"):
+        session._log_heartbeat()
+
+    record = next(r for r in caplog.records if r.getMessage() == "pipeline")
+    assert hasattr(record, "commits") and hasattr(record, "finals")
+    assert hasattr(record, "level_dbfs") and hasattr(record, "stt")
+    assert "機密" not in str(record.__dict__), "the heartbeat must carry no content"
+    await session.stop()

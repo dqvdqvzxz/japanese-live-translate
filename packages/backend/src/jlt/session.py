@@ -60,6 +60,8 @@ log = get_logger(__name__)
 #: How often held fragments are flushed and status is published.
 TICK_INTERVAL_S = 0.25
 STATUS_INTERVAL_S = 1.0
+#: How often the counter-only pipeline snapshot is written to the log.
+HEARTBEAT_INTERVAL_S = 15.0
 
 CaptureFactory = Callable[[], AudioCapture]
 SttFactory = Callable[[Settings], SttProvider]
@@ -320,6 +322,7 @@ class SessionManager:
     async def _tick(self) -> None:
         """Flush held fragments and publish status on a fixed cadence."""
         last_status = 0.0
+        last_heartbeat = 0.0
         try:
             while True:
                 await asyncio.sleep(TICK_INTERVAL_S)
@@ -330,8 +333,38 @@ class SessionManager:
                 if now - last_status >= STATUS_INTERVAL_S:
                     last_status = now
                     self._publish_status()
+                if now - last_heartbeat >= HEARTBEAT_INTERVAL_S:
+                    last_heartbeat = now
+                    self._log_heartbeat()
         except asyncio.CancelledError:
             raise
+
+    def _log_heartbeat(self) -> None:
+        """A counter-only snapshot of the whole pipeline.
+
+        Exists because "it is capturing but no text appears" is otherwise
+        undiagnosable: these five numbers say immediately whether audio is
+        arriving, whether the VAD is closing turns, whether the model is
+        answering, and whether translation is running. No meeting content is
+        included — counts, levels and states only.
+        """
+        stream, stt = self._stream, self._stt
+        transcripts, queue = self._transcripts, self._translations
+        log.info(
+            "pipeline",
+            extra={
+                "capture": self._capture_state,
+                "stt": self._stt_state,
+                "level_dbfs": round(stream.level_dbfs, 1) if stream else None,
+                "speech_audio_s": round(stream.audio_seconds_sent, 1) if stream else 0.0,
+                "commits": stream.seq if stream else 0,
+                "dropped_frames": stream.dropped_frames if stream else 0,
+                "deltas": getattr(getattr(stt, "stats", None), "deltas", 0),
+                "finals": transcripts.finals if transcripts else 0,
+                "translated": queue.translated if queue else 0,
+                "failed": queue.failed if queue else 0,
+            },
+        )
 
     def _on_final(self, transcript: Transcript) -> None:
         if self._segments is None:

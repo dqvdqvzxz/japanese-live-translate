@@ -88,11 +88,30 @@ with others.
 
 ## If something goes wrong
 
+The app writes a log to `~/Library/Logs/JapaneseLiveTranslator/backend.log`.
+It contains counts, timings and error codes — never any meeting content — and
+is the right thing to send when reporting a problem:
+
+```
+tail -40 ~/Library/Logs/JapaneseLiveTranslator/backend.log
+```
+
+A line beginning `"msg": "pipeline"` appears every 15 seconds during a session
+and says where the chain stops:
+
+| Field | Means |
+|---|---|
+| `level_dbfs` near −120 | no audio is arriving — wrong source |
+| `commits` stuck at 0 | audio arrives but is below the speech threshold |
+| `deltas` stuck at 0 | audio reached OpenAI but produced nothing |
+| `finals` rising, `translated` not | transcription works, translation is failing |
+
+
 | Symptom | Cause |
 |---|---|
 | "App is damaged and can't be opened" | The quarantine flag — see step 2 |
 | "Screen Recording permission is required" | Grant it and **restart the app** |
-| Level meter never moves | Wrong source, or that app is not playing audio |
+| Level meter never moves | Wrong source, or that app is not playing audio. For Teams, pick **Microsoft Teams** — helper processes are included automatically |
 | Subtitles stop, status says "Reconnecting…" | Connection to OpenAI dropped; it recovers on its own |
 | Japanese is wrong | Try a higher latency setting in Settings, and add your team's terms to the glossary |
 

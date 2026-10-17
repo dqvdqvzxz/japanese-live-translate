@@ -12,8 +12,11 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import sys
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
 from typing import Any
 
 _API_KEY_RE = re.compile(r"sk-[A-Za-z0-9_\-]{16,}")
@@ -81,19 +84,52 @@ class JsonFormatter(logging.Formatter):
         return _scrub(json.dumps(payload, ensure_ascii=False, default=str))
 
 
-def configure(level: str = "INFO") -> None:
-    """Install JSON logging on stderr.
+def default_log_path() -> Path:
+    override = os.environ.get("JLT_LOG_FILE")
+    if override:
+        return Path(override)
+    return Path.home() / "Library" / "Logs" / "JapaneseLiveTranslator" / "backend.log"
+
+
+def configure(level: str = "INFO", *, log_file: Path | None = None) -> None:
+    """Install JSON logging on stderr and, where possible, a rotating file.
 
     stderr, not stdout: stdout is the handshake channel to the Rust supervisor
     and must stay parseable.
+
+    The file matters because a packaged app launched from Finder has no
+    visible stderr at all — without it there is simply no way to find out why
+    something failed on a user's machine. Content is still never logged; this
+    is counts, ids, latencies and error codes.
     """
-    handler = logging.StreamHandler(sys.stderr)
-    handler.setFormatter(JsonFormatter())
-    handler.addFilter(RedactionFilter())
+    formatter = JsonFormatter()
+    redaction = RedactionFilter()
+
+    handlers: list[logging.Handler] = []
+
+    stream = logging.StreamHandler(sys.stderr)
+    stream.setFormatter(formatter)
+    stream.addFilter(redaction)
+    handlers.append(stream)
+
+    path = log_file or default_log_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        # Bounded: a long meeting should not fill the disk, and nobody reads
+        # more than the last couple of megabytes when diagnosing.
+        rotating = RotatingFileHandler(path, maxBytes=2_000_000, backupCount=2, encoding="utf-8")
+        rotating.setFormatter(formatter)
+        rotating.addFilter(redaction)
+        handlers.append(rotating)
+        path.chmod(0o600)
+    except OSError:
+        # An unwritable log location must never stop the app from starting.
+        pass
 
     root = logging.getLogger()
     root.handlers.clear()
-    root.addHandler(handler)
+    for handler in handlers:
+        root.addHandler(handler)
     root.setLevel(level.upper())
 
     # uvicorn's access log would record query strings, which carry the loopback

@@ -142,6 +142,15 @@ Rust reads it from Keychain and passes it to the Python child via an
 environment variable on spawn (not argv, which is world-readable via `ps`).
 The renderer receives only a boolean `api_key_present`.
 
+### D-11 Per-application capture includes helper processes
+
+Electron-style apps render in separate helper processes: a Teams meeting runs
+in `com.microsoft.teams2.helper`, not in `com.microsoft.teams2`. Filtering on
+an exact bundle id captured the main process — so macOS showed the app as
+being captured and the indicator appeared — while the meeting's audio came
+from a helper and never arrived. The filter now matches the chosen bundle id
+and anything prefixed with it.
+
 ### D-9 The desktop shell needs explicit capabilities
 
 Tauri denies *core* commands unless a capability grants them, while custom

@@ -112,14 +112,27 @@ enum SourceEnumerator {
 
         if sourceID.hasPrefix("app:") {
             let bundleID = String(sourceID.dropFirst("app:".count))
-            let apps = content.applications.filter { $0.bundleIdentifier == bundleID }
+
+            // Include helper processes, not just the exact bundle id.
+            //
+            // Teams and every other Electron-style app render their content in
+            // separate helper processes — `com.microsoft.teams2.helper` is the
+            // WebView that a meeting actually runs in. Filtering on an exact
+            // match captured the main process, so macOS showed the app as
+            // being captured, while the meeting's audio came from a helper and
+            // never arrived. Matching the prefix captures the whole app.
+            let apps = content.applications.filter {
+                $0.bundleIdentifier == bundleID
+                    || $0.bundleIdentifier.hasPrefix(bundleID + ".")
+            }
             guard !apps.isEmpty else {
                 throw TapError.sourceNotFound("No running application with bundle id \(bundleID)")
             }
             let filter = SCContentFilter(display: display,
                                          including: apps,
                                          exceptingWindows: [])
-            let name = apps.first?.applicationName ?? bundleID
+            let name = apps.first(where: { $0.bundleIdentifier == bundleID })?.applicationName
+                ?? apps[0].applicationName
             return (filter, name)
         }
 
