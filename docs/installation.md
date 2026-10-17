@@ -72,7 +72,20 @@ Capture cannot start until a key is present.
 | **Pause / Resume** | Stop sending audio without tearing down the session. The sentence in progress is still finished and translated rather than discarded. |
 | **Pin** | Keeps the window above other windows, so it can sit beside the meeting. |
 | **Settings** | Theme, subtitle size, transcription latency, privacy, API key. |
-| **History** | This session's transcript and its measured statistics. |
+| **History** | Past meetings by date, newest first, with what each cost. Open one for a summary, the action items, the transcript, and export. |
+
+### Naming and exporting
+
+When you press Stop the app asks what to call the recording. Skipping is fine
+— it gets a dated name — and you can rename it later from its page in History.
+
+Export writes to your Downloads folder:
+
+- **one meeting** → a single file named after the recording;
+- **the whole history** → a folder `All History - yyyymmdd`, one document per
+  meeting, so a year of meetings stays searchable.
+
+Nothing is ever exported automatically.
 
 ### Reading the status bar
 

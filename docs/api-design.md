@@ -34,8 +34,10 @@ backend process and handed to the renderer by the Rust shell. See
 | `GET` | `/api/history/sessions?limit=` | — | `{"persisting":bool,"sessions":[SessionRecord]}`, newest first |
 | `GET` | `/api/history/sessions/{id}` | — | `{"session":SessionRecord,"segments":[Segment]}` |
 | `POST` | `/api/history/sessions/{id}/summary` | — | `SessionSummary` — generates it, costs money |
-| `GET` | `/api/history/sessions/{id}/export?format=md\|txt\|csv\|json` | — | the file, with `Content-Disposition` |
-| `GET` | `/api/history/export?format=…` | — | every session as one file |
+| `PATCH` | `/api/history/sessions/{id}` | `{"name":"…"}` | `SessionRecord` — rename a recording |
+| `GET` | `/api/history/sessions/{id}/export?format=md\|txt\|csv\|json` | — | the file, named after the recording |
+| `GET` | `/api/history/export/bundle?format=…` | — | `{"folder":"All History - yyyymmdd","files":[{filename,content}]}` |
+| `GET` | `/api/history/export?format=…` | — | every session concatenated, for clients that cannot write a folder |
 | `DELETE` | `/api/history/sessions/{id}` | — | `{"status":"deleted"}` |
 | `DELETE` | `/api/history` | — | `{"status":"cleared"}` |
 | `GET` | `/api/metrics` | — | `SessionStats` (measured latencies, usage, cost estimate) |

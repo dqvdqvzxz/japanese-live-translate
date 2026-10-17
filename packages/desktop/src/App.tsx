@@ -4,6 +4,7 @@ import { startMockStream } from "./api/mock";
 import { setAlwaysOnTop } from "./api/tauri";
 import { Controls } from "./components/Controls";
 import { HistoryPanel } from "./components/HistoryPanel";
+import { NameRecordingDialog } from "./components/NameRecordingDialog";
 import { PermissionDialog } from "./components/PermissionDialog";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { StatusBar } from "./components/StatusBar";
@@ -35,6 +36,8 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [permissionError, setPermissionError] = useState<string | null>(null);
+  /** Set when a session has just stopped and is waiting to be named. */
+  const [naming, setNaming] = useState<{ id: string; lines: number } | null>(null);
   const stopMock = useRef<(() => void) | null>(null);
 
   // Connect to the backend, or fall back to the demo stream when there is no
@@ -188,7 +191,18 @@ export default function App() {
         busy={busy || mock}
         alwaysOnTop={settings?.ui.always_on_top ?? true}
         onStart={() => client && run(() => client.start(selected))}
-        onStop={() => client && run(() => client.stop())}
+        onStop={() =>
+          client &&
+          run(async () => {
+            const sessionId = state.sessionId;
+            const result = await client.stop();
+            // Offer a name while the meeting is still fresh. Skipping is fine;
+            // the backend has already given it a dated default.
+            if (sessionId) {
+              setNaming({ id: sessionId, lines: result.stats?.segments_translated ?? 0 });
+            }
+          })
+        }
         onPause={() => client && run(() => client.pause())}
         onResume={() => client && run(() => client.resume())}
         onToggleAlwaysOnTop={toggleAlwaysOnTop}
@@ -199,6 +213,19 @@ export default function App() {
         <div className={`banner banner--${bannerKind}`} role="alert">
           {banner}
         </div>
+      )}
+
+      {naming && (
+        <NameRecordingDialog
+          defaultName={defaultRecordingName()}
+          lines={naming.lines}
+          onSave={(name) => {
+            const id = naming.id;
+            setNaming(null);
+            if (client) void run(() => client.renameSession(id, name));
+          }}
+          onSkip={() => setNaming(null)}
+        />
       )}
 
       {permissionError && (
@@ -245,6 +272,15 @@ export default function App() {
       <StatusBar state={state} connected={connected} mock={mock} />
     </div>
   );
+}
+
+/** Mirrors the backend's default: date first, so exports sort chronologically. */
+function defaultRecordingName(): string {
+  const now = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(
+    now.getHours(),
+  )}${pad(now.getMinutes())}`;
 }
 
 /** Shallow-per-section merge, which matches the shape of a settings patch. */

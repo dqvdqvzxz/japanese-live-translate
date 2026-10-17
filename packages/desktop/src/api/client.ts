@@ -25,6 +25,11 @@ export interface ExportedFile {
   body: string;
 }
 
+export interface ExportBundle {
+  folder: string;
+  files: { filename: string; content: string }[];
+}
+
 export interface SessionSummary {
   overview: string;
   action_items: string[];
@@ -34,6 +39,8 @@ export interface SessionSummary {
 
 export interface SessionRecord {
   session_id: string;
+  /** What the user called it. Empty means never named; fall back to the date. */
+  name: string;
   started_at: number;
   ended_at: number | null;
   duration_s: number;
@@ -195,12 +202,24 @@ export class BackendClient {
     );
   }
 
-  /** Every stored meeting, as one file. */
+  /** Every stored meeting, as one file. Used only where a folder is impossible. */
   exportAll(format: ExportFormat): Promise<ExportedFile> {
     return this.download(
       `/api/history/export?format=${format}`,
       `meeting-history.${format}`,
     );
+  }
+
+  /** Every stored meeting as a separate document, for writing into one folder. */
+  exportBundle(format: ExportFormat): Promise<ExportBundle> {
+    return this.request(`/api/history/export/bundle?format=${format}`);
+  }
+
+  renameSession(id: string, name: string): Promise<SessionRecord> {
+    return this.request(`/api/history/sessions/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ name }),
+    });
   }
 
   private async download(path: string, fallbackName: string): Promise<ExportedFile> {

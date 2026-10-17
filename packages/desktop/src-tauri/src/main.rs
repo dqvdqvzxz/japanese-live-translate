@@ -141,6 +141,64 @@ fn save_to_downloads(filename: String, contents: String) -> Result<String, Strin
     Ok(target.to_string_lossy().to_string())
 }
 
+#[derive(Debug, Deserialize)]
+struct ExportFile {
+    filename: String,
+    content: String,
+}
+
+/// Write a whole history export into one folder under ~/Downloads.
+///
+/// A year of meetings concatenated into a single file is not something anyone
+/// can search or file away, so each meeting is its own document and the folder
+/// is what the user gets.
+///
+/// Every name — the folder and each file — is reduced to its last path
+/// component before use. The backend already sanitises them, but a path
+/// arriving here must not be able to escape Downloads regardless of who built
+/// it.
+#[tauri::command]
+fn save_folder_to_downloads(folder: String, files: Vec<ExportFile>) -> Result<String, String> {
+    let folder_name = leaf(&folder).ok_or("invalid folder name")?;
+    let mut target = std::path::PathBuf::from(home_dir())
+        .join("Downloads")
+        .join(&folder_name);
+
+    // Keep an earlier export of the same day rather than overwriting it.
+    if target.exists() {
+        for n in 2..1000 {
+            let candidate = std::path::PathBuf::from(home_dir())
+                .join("Downloads")
+                .join(format!("{folder_name} ({n})"));
+            if !candidate.exists() {
+                target = candidate;
+                break;
+            }
+        }
+    }
+    std::fs::create_dir_all(&target).map_err(|e| e.to_string())?;
+
+    for file in &files {
+        let name = leaf(&file.filename).ok_or("invalid filename")?;
+        std::fs::write(target.join(name), &file.content).map_err(|e| e.to_string())?;
+    }
+
+    Ok(target.to_string_lossy().to_string())
+}
+
+/// The last path component of a name, so a crafted value cannot escape its
+/// parent directory.
+fn leaf(name: &str) -> Option<String> {
+    let leaf = std::path::Path::new(name)
+        .file_name()?
+        .to_string_lossy()
+        .to_string();
+    if leaf.is_empty() || leaf == "." || leaf == ".." {
+        return None;
+    }
+    Some(leaf)
+}
+
 /// Open System Settings directly at Privacy & Security > Screen Recording.
 ///
 /// macOS requires this permission for ScreenCaptureKit even though the app
@@ -303,6 +361,7 @@ fn main() {
             set_always_on_top,
             open_screen_recording_settings,
             save_to_downloads,
+            save_folder_to_downloads,
             relaunch,
         ])
         .setup(|app| {

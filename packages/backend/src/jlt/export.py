@@ -39,14 +39,77 @@ def _duration(seconds: float) -> str:
     return f"{hours}h {minutes:02d}m" if hours else f"{minutes}m {secs:02d}s"
 
 
-def filename(record: SessionRecord, fmt: ExportFormat) -> str:
+#: Characters a macOS filename cannot contain, plus control characters.
+_UNSAFE = set('/\\:*?"<>|') | {chr(c) for c in range(32)}
+
+
+def default_session_name(record: SessionRecord) -> str:
+    """The name used when the user does not supply one.
+
+    Date first so a folder of exports sorts chronologically, and the source
+    after it so two meetings on the same day are still distinguishable.
+    """
     stamp = datetime.fromtimestamp(record.started_at, tz=UTC).astimezone()
-    return f"meeting-{stamp.strftime('%Y%m%d-%H%M')}.{EXTENSIONS[fmt]}"
+    source = record.source_name or "Meeting"
+    return f"{stamp.strftime('%Y-%m-%d %H%M')} {source}"
+
+
+def display_name(record: SessionRecord) -> str:
+    return record.name.strip() or default_session_name(record)
+
+
+def safe_filename(name: str) -> str:
+    """Turn a user-chosen name into something a filesystem accepts.
+
+    Leading dots are dropped too: a name beginning with one would produce a
+    hidden file, and a user who typed it would reasonably think the export had
+    failed.
+    """
+    cleaned = "".join(" " if ch in _UNSAFE else ch for ch in name)
+    cleaned = " ".join(cleaned.split()).lstrip(". ")
+    return (cleaned or "meeting")[:120]
+
+
+def filename(record: SessionRecord, fmt: ExportFormat) -> str:
+    """A single export is named after the recording itself."""
+    return f"{safe_filename(display_name(record))}.{EXTENSIONS[fmt]}"
+
+
+def archive_folder_name() -> str:
+    return f"All History - {datetime.now().astimezone().strftime('%Y%m%d')}"
 
 
 def archive_filename(fmt: ExportFormat) -> str:
-    stamp = datetime.now().astimezone().strftime("%Y%m%d-%H%M")
-    return f"meeting-history-{stamp}.{EXTENSIONS[fmt]}"
+    return f"{archive_folder_name()}.{EXTENSIONS[fmt]}"
+
+
+def render_bundle(
+    sessions: list[tuple[SessionRecord, list[Segment]]], fmt: ExportFormat
+) -> dict[str, object]:
+    """One file per meeting, for writing into a folder.
+
+    Exporting the whole history as a single blob makes a year of meetings
+    unusable; one file each, named after the recording, is what a person can
+    actually search and file away.
+
+    Names are deduplicated, because two recordings may share a name — the user
+    is free to call them both "Standup".
+    """
+    folder = archive_folder_name()
+    used: set[str] = set()
+    files: list[dict[str, str]] = []
+
+    for record, segments in sessions:
+        base = safe_filename(display_name(record))
+        candidate = f"{base}.{EXTENSIONS[fmt]}"
+        counter = 2
+        while candidate in used:
+            candidate = f"{base} ({counter}).{EXTENSIONS[fmt]}"
+            counter += 1
+        used.add(candidate)
+        files.append({"filename": candidate, "content": render(record, segments, fmt)})
+
+    return {"folder": folder, "files": files}
 
 
 def render_all(sessions: list[tuple[SessionRecord, list[Segment]]], fmt: ExportFormat) -> str:
@@ -153,7 +216,9 @@ def render(record: SessionRecord, segments: list[Segment], fmt: ExportFormat) ->
 
 def _markdown(record: SessionRecord, segments: list[Segment]) -> str:
     out: list[str] = [
-        f"# Meeting — {_local_time(record.started_at)}",
+        f"# {display_name(record)}",
+        "",
+        f"_{_local_time(record.started_at)}_",
         "",
         f"- Source: {record.source_name or 'unknown'}",
         f"- Duration: {_duration(record.duration_s)}",

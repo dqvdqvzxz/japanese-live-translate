@@ -60,6 +60,14 @@ export async function saveToDownloads(filename: string, contents: string): Promi
   return invoke<string>("save_to_downloads", { filename, contents });
 }
 
+/** Writes a whole-history export as one folder under ~/Downloads. */
+export async function saveFolderToDownloads(
+  folder: string,
+  files: { filename: string; content: string }[],
+): Promise<string> {
+  return invoke<string>("save_folder_to_downloads", { folder, files });
+}
+
 /** Opens System Settings at Privacy & Security > Screen Recording. */
 export async function openScreenRecordingSettings(): Promise<void> {
   await invoke("open_screen_recording_settings");

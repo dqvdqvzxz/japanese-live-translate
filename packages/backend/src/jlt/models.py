@@ -255,6 +255,9 @@ class SessionRecord(BaseModel):
     """A finished session, as it appears in the history list."""
 
     session_id: str
+    #: What the user called this recording. Empty means "never named", and the
+    #: UI falls back to `default_session_name`.
+    name: str = ""
     started_at: float
     ended_at: float | None = None
     duration_s: float = 0.0

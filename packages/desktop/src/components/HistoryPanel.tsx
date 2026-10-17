@@ -6,7 +6,7 @@ import {
   type SessionRecord,
   type StoredSegment,
 } from "../api/client";
-import { isDesktop, saveToDownloads } from "../api/tauri";
+import { isDesktop, saveFolderToDownloads, saveToDownloads } from "../api/tauri";
 import { formatDuration, groupByDay, totalCost } from "./historyUtils";
 
 interface Props {
@@ -38,6 +38,7 @@ export function HistoryPanel({ client, onClose, onEnablePersistence }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
+  const [renaming, setRenaming] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     if (!client) return;
@@ -108,7 +109,34 @@ export function HistoryPanel({ client, onClose, onEnablePersistence }: Props) {
     deliver(() => client!.exportSession(id, format));
 
   const exportEverything = (format: ExportFormat) =>
-    deliver(() => client!.exportAll(format));
+    run(async () => {
+      if (!client) return;
+      if (isDesktop()) {
+        // One document per meeting, in one folder: a year of meetings in a
+        // single file is not something anyone can search or file away.
+        const bundle = await client.exportBundle(format);
+        setSaved(await saveFolderToDownloads(bundle.folder, bundle.files));
+        return;
+      }
+      // A browser cannot be handed a folder, so it gets the combined file.
+      const { filename, body } = await client.exportAll(format);
+      const url = URL.createObjectURL(new Blob([body], { type: "text/plain" }));
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = filename;
+      anchor.click();
+      URL.revokeObjectURL(url);
+      setSaved(filename);
+    });
+
+  const rename = (id: string, name: string) =>
+    run(async () => {
+      if (!client) return;
+      await client.renameSession(id, name);
+      setRenaming(null);
+      await refresh();
+      if (selected === id) setDetail(await client.sessionDetail(id));
+    });
 
   // --- detail ---------------------------------------------------------------
 
@@ -126,7 +154,42 @@ export function HistoryPanel({ client, onClose, onEnablePersistence }: Props) {
           </button>
         </div>
 
-        <h2 className="hist__title">{dateLabel(session.started_at)}</h2>
+        {renaming === session.session_id ? (
+          <form
+            className="hist__name"
+            onSubmit={(e) => {
+              e.preventDefault();
+              const input = e.currentTarget.elements.namedItem("name");
+              if (input instanceof HTMLInputElement) rename(session.session_id, input.value);
+            }}
+          >
+            <input
+              name="name"
+              defaultValue={session.name}
+              placeholder={dateLabel(session.started_at)}
+              maxLength={120}
+              autoFocus
+              aria-label="Tên bản ghi"
+            />
+            <button className="btn btn--primary" type="submit" disabled={busy}>
+              Lưu
+            </button>
+            <button className="btn" type="button" onClick={() => setRenaming(null)}>
+              Huỷ
+            </button>
+          </form>
+        ) : (
+          <div className="hist__name">
+            <h2 className="hist__title">{session.name || dateLabel(session.started_at)}</h2>
+            <button
+              className="btn btn--icon"
+              onClick={() => setRenaming(session.session_id)}
+              aria-label="Đổi tên"
+            >
+              Đổi tên
+            </button>
+          </div>
+        )}
         <p className="panel__hint">
           {session.source_name || "Unknown source"} · {formatDuration(session.duration_s)} ·{" "}
           {session.segments_translated} lines · ${session.estimated_cost_usd.toFixed(3)}{" "}
@@ -264,7 +327,8 @@ export function HistoryPanel({ client, onClose, onEnablePersistence }: Props) {
                     })}
                   </span>
                   <span className="hist__meta">
-                    {session.source_name || "—"} · {formatDuration(session.duration_s)} ·{" "}
+                    {session.name || session.source_name || "—"} ·{" "}
+                    {formatDuration(session.duration_s)} ·{" "}
                     {session.segments_translated} lines
                     {session.summary && <span className="hist__badge">tóm tắt</span>}
                   </span>
@@ -280,8 +344,10 @@ export function HistoryPanel({ client, onClose, onEnablePersistence }: Props) {
         <section className="panel__section">
           <h3>Export toàn bộ</h3>
           <p className="panel__hint">
-            Gộp tất cả {sessions.length} phiên vào một tệp. Không có gì được
-            xuất tự động — chỉ khi bạn bấm.
+            {isDesktop()
+              ? `Tạo thư mục "All History - yyyymmdd" trong Downloads, mỗi phiên một tệp riêng.`
+              : `Trình duyệt không nhận được thư mục, nên ${sessions.length} phiên sẽ gộp vào một tệp.`}{" "}
+            Không có gì được xuất tự động — chỉ khi bạn bấm.
           </p>
           <div className="panel__row">
             {FORMATS.map((format) => (

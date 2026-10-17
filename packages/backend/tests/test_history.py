@@ -216,3 +216,127 @@ def test_json_export_is_machine_readable():
     payload = json.loads(render(record("s_1", 1000.0), [segment(1)], "json"))
     assert payload["session"]["session_id"] == "s_1"
     assert payload["segments"][0]["seq"] == 1
+
+
+# --- names ------------------------------------------------------------------
+
+
+def test_an_unnamed_recording_gets_a_sortable_default():
+    from jlt.export import default_session_name
+
+    name = default_session_name(record("s_1", 1760000000.0))
+    assert name.startswith("20")  # year first, so a folder sorts chronologically
+    assert "Microsoft Teams" in name
+
+
+def test_a_user_name_wins_over_the_default():
+    from jlt.export import display_name
+
+    rec = record("s_1", 1760000000.0)
+    rec.name = "Sprint planning"
+    assert display_name(rec) == "Sprint planning"
+
+
+def test_a_blank_name_falls_back_rather_than_producing_an_empty_file():
+    from jlt.export import display_name
+
+    rec = record("s_1", 1760000000.0)
+    rec.name = "   "
+    assert display_name(rec).strip()
+
+
+@pytest.mark.parametrize(
+    ("raw", "forbidden"),
+    [("a/b", "/"), ("a:b", ":"), ("a*b?", "*"), ('a"b', '"'), ("a|b", "|")],
+)
+def test_filesystem_unsafe_characters_are_removed(raw: str, forbidden: str):
+    from jlt.export import safe_filename
+
+    assert forbidden not in safe_filename(raw)
+
+
+def test_a_leading_dot_does_not_produce_a_hidden_file():
+    from jlt.export import safe_filename
+
+    assert not safe_filename(".secret meeting").startswith(".")
+
+
+def test_an_entirely_unsafe_name_still_yields_a_filename():
+    from jlt.export import safe_filename
+
+    assert safe_filename("///") == "meeting"
+
+
+def test_names_are_bounded():
+    from jlt.export import safe_filename
+
+    assert len(safe_filename("x" * 500)) <= 120
+
+
+def test_renaming_persists(tmp_path):
+    manager = persistent(tmp_path)
+    manager.begin_session("s_1", "Teams", 1000.0)
+    manager.end_session(record("s_1", 1000.0))
+    manager.rename("s_1", "Sprint planning")
+    manager.close()
+
+    reopened = HistoryManager(persist=True, db_path=tmp_path / "history.sqlite3")
+    assert reopened.get_session("s_1").name == "Sprint planning"  # type: ignore[union-attr]
+
+
+def test_a_database_from_an_older_build_gains_the_name_column(tmp_path):
+    """CREATE TABLE IF NOT EXISTS does nothing to an existing table, so without
+    a migration every query against an older database would fail."""
+    import sqlite3
+
+    path = tmp_path / "history.sqlite3"
+    legacy = sqlite3.connect(path)
+    legacy.execute(
+        "CREATE TABLE sessions (session_id TEXT PRIMARY KEY, started_at REAL NOT NULL, "
+        "ended_at REAL, duration_s REAL NOT NULL DEFAULT 0, source_name TEXT NOT NULL "
+        "DEFAULT '', segments_translated INTEGER NOT NULL DEFAULT 0, segments_failed "
+        "INTEGER NOT NULL DEFAULT 0, audio_seconds_sent REAL NOT NULL DEFAULT 0, "
+        "input_tokens INTEGER NOT NULL DEFAULT 0, output_tokens INTEGER NOT NULL "
+        "DEFAULT 0, estimated_cost_usd REAL NOT NULL DEFAULT 0, summary_json TEXT)"
+    )
+    legacy.execute("INSERT INTO sessions (session_id, started_at) VALUES ('s_old', 1.0)")
+    legacy.commit()
+    legacy.close()
+
+    manager = HistoryManager(persist=True, db_path=path)
+    listed = manager.list_sessions()
+    assert [r.session_id for r in listed] == ["s_old"]
+    assert listed[0].name == ""
+
+
+# --- bundle -----------------------------------------------------------------
+
+
+def test_the_bundle_folder_is_named_for_today():
+    from jlt.export import render_bundle
+
+    bundle = render_bundle([(record("s_1", 1000.0), [segment(1)])], "md")
+    assert str(bundle["folder"]).startswith("All History - ")
+
+
+def test_each_bundle_file_holds_one_meeting():
+    from jlt.export import render_bundle
+
+    first = record("s_1", 1000.0)
+    first.name = "Alpha"
+    second = record("s_2", 2000.0)
+    second.name = "Beta"
+    files = render_bundle([(first, [segment(1)]), (second, [segment(2)])], "md")["files"]
+    names = [f["filename"] for f in files]  # type: ignore[index]
+    assert names == ["Alpha.md", "Beta.md"]
+
+
+def test_colliding_names_are_disambiguated():
+    """Two recordings may legitimately both be called "Standup"."""
+    from jlt.export import render_bundle
+
+    first, second = record("s_1", 1000.0), record("s_2", 2000.0)
+    first.name = second.name = "Standup"
+    files = render_bundle([(first, [segment(1)]), (second, [segment(2)])], "md")["files"]
+    names = [f["filename"] for f in files]  # type: ignore[index]
+    assert names == ["Standup.md", "Standup (2).md"]

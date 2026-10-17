@@ -27,6 +27,7 @@ MAX_IN_MEMORY = 2000
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS sessions (
     session_id          TEXT PRIMARY KEY,
+    name                TEXT NOT NULL DEFAULT '',
     started_at          REAL NOT NULL,
     ended_at            REAL,
     duration_s          REAL NOT NULL DEFAULT 0,
@@ -78,9 +79,24 @@ class HistoryManager:
         self._connection = sqlite3.connect(self._db_path, check_same_thread=False)
         self._connection.row_factory = sqlite3.Row
         self._connection.executescript(_SCHEMA)
+        self._migrate()
         self._connection.commit()
         # Meeting content on disk should at least be out of other users' reach.
         self._db_path.chmod(0o600)
+
+    def _migrate(self) -> None:
+        """Add columns that later versions introduced.
+
+        `CREATE TABLE IF NOT EXISTS` does nothing to a table that already
+        exists, so a database written by an earlier build would be missing
+        `name` and every query against it would fail.
+        """
+        assert self._connection is not None
+        columns = {row["name"] for row in self._connection.execute("PRAGMA table_info(sessions)")}
+        if "name" not in columns:
+            self._connection.execute(
+                "ALTER TABLE sessions ADD COLUMN name TEXT NOT NULL DEFAULT ''"
+            )
 
     @property
     def persisting(self) -> bool:
@@ -101,6 +117,18 @@ class HistoryManager:
             (session_id, started_at, source_name),
         )
         self._connection.commit()
+
+    def rename(self, session_id: str, name: str) -> SessionRecord | None:
+        """Set the user's name for a recording. An empty name clears it."""
+        cleaned = " ".join(name.split())[:120]
+        if self._current and self._current.session_id == session_id:
+            self._current.name = cleaned
+        if self._connection is not None:
+            self._connection.execute(
+                "UPDATE sessions SET name = ? WHERE session_id = ?", (cleaned, session_id)
+            )
+            self._connection.commit()
+        return self.get_session(session_id)
 
     def end_session(self, record: SessionRecord) -> None:
         self._current = record
@@ -247,6 +275,7 @@ def _record_from_row(row: sqlite3.Row) -> SessionRecord:
             log.warning("stored summary is unreadable; ignoring it")
     return SessionRecord(
         session_id=row["session_id"],
+        name=row["name"] or "",
         started_at=row["started_at"],
         ended_at=row["ended_at"],
         duration_s=row["duration_s"],

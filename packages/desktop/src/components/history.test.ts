@@ -5,6 +5,7 @@ import type { SessionRecord } from "../api/client";
 function session(id: string, startedAt: number, cost = 0.1): SessionRecord {
   return {
     session_id: id,
+    name: "",
     started_at: startedAt,
     ended_at: startedAt + 600,
     duration_s: 600,

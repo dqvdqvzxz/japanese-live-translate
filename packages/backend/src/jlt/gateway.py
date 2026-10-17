@@ -27,7 +27,14 @@ from starlette.websockets import WebSocketDisconnect
 from . import __version__
 from .audio.capture_service import CaptureError, PermissionDenied
 from .events import EventDispatcher
-from .export import EXTENSIONS, MEDIA_TYPES, archive_filename, render, render_all
+from .export import (
+    EXTENSIONS,
+    MEDIA_TYPES,
+    archive_filename,
+    render,
+    render_all,
+    render_bundle,
+)
 from .export import filename as export_filename
 from .logging import get_logger
 from .models import GlossaryEntry
@@ -64,6 +71,10 @@ def api_error(status: int, code: str, message: str) -> HTTPException:
 
 class StartRequest(BaseModel):
     source_id: str
+
+
+class RenameRequest(BaseModel):
+    name: str
 
 
 class GlossaryRequest(BaseModel):
@@ -226,6 +237,28 @@ def create_app(
             "sessions": [r.model_dump() for r in session.history.list_sessions(limit)],
         }
 
+    @app.get("/api/history/export/bundle", dependencies=guard)
+    async def export_bundle(
+        fmt: str = Query(default="md", alias="format"),
+    ) -> dict[str, Any]:
+        """Every meeting as a separate file, for writing into one folder.
+
+        Returned as JSON rather than an archive because the desktop shell
+        writes the folder natively; a single blob of a year's meetings would
+        not be something anyone could search.
+        """
+        if fmt not in EXTENSIONS:
+            raise api_error(
+                400, "unsupported_format", f"Supported formats: {', '.join(EXTENSIONS)}."
+            )
+        records = session.history.list_sessions(limit=10_000)
+        if not records:
+            raise api_error(404, "history_empty", "There is nothing to export yet.")
+        bundle = [
+            (record, session.history.session_segments(record.session_id)) for record in records
+        ]
+        return render_bundle(bundle, fmt)  # type: ignore[arg-type]
+
     @app.get("/api/history/export", dependencies=guard)
     async def export_all(fmt: str = Query(default="md", alias="format")) -> Response:
         """Export every stored session as one file.
@@ -263,6 +296,14 @@ def create_app(
             "session": record.model_dump(),
             "segments": [s.model_dump() for s in session.history.session_segments(session_id)],
         }
+
+    @app.patch("/api/history/sessions/{session_id}", dependencies=guard)
+    async def rename_session(session_id: str, payload: RenameRequest) -> dict[str, Any]:
+        if session.history.get_session(session_id) is None:
+            raise api_error(404, "session_not_found", "No such session in history.")
+        record = session.history.rename(session_id, payload.name)
+        assert record is not None
+        return record.model_dump()
 
     @app.post("/api/history/sessions/{session_id}/summary", dependencies=guard)
     async def summarize(session_id: str) -> dict[str, Any]:

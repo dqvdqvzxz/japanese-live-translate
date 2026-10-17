@@ -18,6 +18,37 @@ AUTH = {"Authorization": f"Bearer {TOKEN.reveal()}"}
 
 
 @pytest.fixture
+def persisting_client(tmp_path):
+    """A client whose history is saved, so more than one session can exist.
+
+    The default fixture deliberately does not persist, matching the product
+    default — but that means its history only ever holds the current session,
+    which is the wrong setting for testing a multi-meeting export.
+    """
+    from jlt.history import HistoryManager
+
+    settings_manager = SettingsManager(tmp_path, api_key_present=True)
+    dispatcher = EventDispatcher()
+    session = SessionManager(
+        settings_manager,
+        dispatcher,
+        capture_factory=FakeCapture,
+        stt_factory=lambda _s: ScriptedStt(),
+        translation_factory=lambda _s: FakeTranslationProvider(),
+        history=HistoryManager(persist=True, db_path=tmp_path / "history.sqlite3"),
+    )
+    app = create_app(
+        token=TOKEN,
+        settings_manager=settings_manager,
+        session=session,
+        dispatcher=dispatcher,
+        started_at=0.0,
+    )
+    with TestClient(app) as test_client:
+        yield test_client
+
+
+@pytest.fixture
 def client(tmp_path):
     settings_manager = SettingsManager(tmp_path, api_key_present=True)
     dispatcher = EventDispatcher()
@@ -399,7 +430,7 @@ def test_export_returns_a_downloadable_file(client):
     assert response.status_code == 200
     assert "attachment" in response.headers["content-disposition"]
     assert response.headers["content-disposition"].endswith('.md"')
-    assert "# Meeting" in response.text
+    assert "Microsoft Teams" in response.text
 
 
 def test_export_rejects_an_unknown_format(client):
@@ -444,25 +475,14 @@ def test_the_export_filename_is_readable_cross_origin(client):
     assert "Content-Disposition" in exposed
 
 
-def test_export_suggests_a_dated_filename(client):
-    started = client.post("/api/session/start", headers=AUTH, json={"source_id": "app:x"}).json()[
-        "session_id"
-    ]
-    client.post("/api/session/stop", headers=AUTH)
-    disposition = client.get(
-        f"/api/history/sessions/{started}/export?format=md", headers=AUTH
-    ).headers["content-disposition"]
-    assert "meeting-" in disposition
-
-
-def test_the_whole_history_can_be_exported(client):
+def test_the_whole_history_can_be_exported(persisting_client):
     for _ in range(2):
-        client.post("/api/session/start", headers=AUTH, json={"source_id": "app:x"})
-        client.post("/api/session/stop", headers=AUTH)
-    response = client.get("/api/history/export?format=md", headers=AUTH)
+        persisting_client.post("/api/session/start", headers=AUTH, json={"source_id": "app:x"})
+        persisting_client.post("/api/session/stop", headers=AUTH)
+    response = persisting_client.get("/api/history/export?format=md", headers=AUTH)
     assert response.status_code == 200
     assert "# Meeting history" in response.text
-    assert "meeting-history-" in response.headers["content-disposition"]
+    assert "All History - " in response.headers["content-disposition"]
 
 
 def test_exporting_an_empty_history_says_so(client):
@@ -476,3 +496,60 @@ def test_the_export_route_is_not_mistaken_for_a_session_id(client):
     client.post("/api/session/start", headers=AUTH, json={"source_id": "app:x"})
     client.post("/api/session/stop", headers=AUTH)
     assert client.get("/api/history/export?format=md", headers=AUTH).status_code == 200
+
+
+def test_a_recording_can_be_renamed(client):
+    started = client.post("/api/session/start", headers=AUTH, json={"source_id": "app:x"}).json()[
+        "session_id"
+    ]
+    client.post("/api/session/stop", headers=AUTH)
+    body = client.patch(
+        f"/api/history/sessions/{started}", headers=AUTH, json={"name": "  Daily  standup "}
+    ).json()
+    assert body["name"] == "Daily standup"
+    listed = client.get("/api/history/sessions", headers=AUTH).json()["sessions"]
+    assert listed[0]["name"] == "Daily standup"
+
+
+def test_renaming_an_unknown_session_is_a_typed_404(client):
+    response = client.patch("/api/history/sessions/s_nope", headers=AUTH, json={"name": "x"})
+    assert response.status_code == 404
+    assert response.json()["detail"]["code"] == "session_not_found"
+
+
+def test_the_bundle_gives_one_file_per_meeting(persisting_client):
+    """A year of meetings in one blob is not something anyone can search."""
+    for _ in range(2):
+        persisting_client.post("/api/session/start", headers=AUTH, json={"source_id": "app:x"})
+        persisting_client.post("/api/session/stop", headers=AUTH)
+    body = persisting_client.get("/api/history/export/bundle?format=md", headers=AUTH).json()
+    assert body["folder"].startswith("All History - ")
+    assert len(body["files"]) == 2
+    assert all(f["filename"].endswith(".md") for f in body["files"])
+
+
+def test_bundle_filenames_are_unique_even_when_names_collide(persisting_client):
+    ids = []
+    for _ in range(2):
+        ids.append(
+            persisting_client.post(
+                "/api/session/start", headers=AUTH, json={"source_id": "app:x"}
+            ).json()["session_id"]
+        )
+        persisting_client.post("/api/session/stop", headers=AUTH)
+    for session_id in ids:
+        persisting_client.patch(
+            f"/api/history/sessions/{session_id}", headers=AUTH, json={"name": "Standup"}
+        )
+    files = persisting_client.get("/api/history/export/bundle?format=md", headers=AUTH).json()[
+        "files"
+    ]
+    names = [f["filename"] for f in files]
+    assert len(set(names)) == len(names)
+    assert "Standup.md" in names
+
+
+def test_an_empty_bundle_says_so(client):
+    response = client.get("/api/history/export/bundle?format=md", headers=AUTH)
+    assert response.status_code == 404
+    assert response.json()["detail"]["code"] == "history_empty"
