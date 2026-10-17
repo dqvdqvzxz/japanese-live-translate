@@ -41,8 +41,3 @@ packages/desktop/src-tauri/gen/
 
 # Release artifacts
 dist/
-
-packages/backend/.venv-x86/
-packages/backend/dist-x86/
-packages/backend/build-x86/
-packages/audio-capture/.build/

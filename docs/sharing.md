@@ -6,7 +6,7 @@ Live Japanese → Vietnamese subtitles for Microsoft Teams on macOS.
 
 | You need | Why |
 |---|---|
-| **macOS 13 (Ventura) or later** | The app uses ScreenCaptureKit. Universal builds run on Apple Silicon and Intel; a build made with `make release` rather than `make release-universal` is Apple Silicon only |
+| **macOS 13 (Ventura) or later** on **Apple Silicon** | The app uses ScreenCaptureKit; this build is arm64 only and will not run on an Intel Mac |
 | **Your own OpenAI API key** | The app does all transcription and translation through the OpenAI API. The key is yours and is billed to you — roughly **$1.30 per meeting hour** |
 | **Screen Recording permission** | macOS requires it for audio capture, with no narrower option |
 

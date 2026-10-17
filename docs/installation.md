@@ -217,29 +217,16 @@ first launch, and it is **Apple Silicon only** (see Architecture below).
 
 ### Architecture
 
-`make release` builds for the machine you are on. For a build that runs on
-both Apple Silicon and Intel:
+This builds for the architecture of the machine you are on — the artifact above
+is `aarch64` (Apple Silicon). For a universal binary, add the Intel target and
+build for both:
 
 ```bash
 rustup target add x86_64-apple-darwin
-make release-universal
+npm --prefix packages/desktop run tauri build -- --target universal-apple-darwin
 ```
 
-Three pieces have to be handled differently:
-
-- **Rust** — Tauri's `universal-apple-darwin` target handles it.
-- **The Swift helper** — SwiftPM's `--arch` needs full Xcode, which the
-  Command Line Tools do not provide, so each architecture is compiled with
-  `swiftc` and merged with `lipo`.
-- **The Python backend** — PyInstaller cannot cross-compile, so
-  `scripts/freeze_backend_x86.sh` installs an x86_64 CPython through uv (by
-  explicit key, which works on Apple Silicon) and freezes under Rosetta.
-  The two backends are **not** merged: a PyInstaller executable carries an
-  embedded archive of architecture-specific dylibs, and `lipo` merges only the
-  Mach-O header, so the merged x86_64 slice fails at startup trying to load
-  arm64 libraries. Both ship, and the shell picks by `std::env::consts::ARCH`.
-
-The result has never been run on an actual Intel Mac.
+Not tested on Intel.
 
 ---
 

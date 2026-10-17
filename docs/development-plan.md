@@ -220,9 +220,8 @@ stream.
 | Task | Status |
 |---|---|
 | Test against real Microsoft Teams | ✅ capture verified, peak 25053 |
-| Test browser audio | ✅ Chrome captured at peak 8898, −15.1 dBFS |
-| Test with headphones | ✅ captured at peak 7525 with output on a JBL headset |
-| Intel Mac support | ✅ universal build; **running it on an Intel Mac is still untested** |
+| Test browser audio | ⛔ manual — needs audio actually playing in a browser |
+| Test with headphones | ⛔ manual — hardware |
 | Network interruption and reconnection | ✅ 6 tests against a real local WebSocket server |
 | Latency benchmarks | ✅ recorded in `docs/benchmarks.md` |
 | 60-minute continuous run | ✅ 60.2 min, no leak, 0 orphans, 1 auto-recovered reconnect |
@@ -307,10 +306,6 @@ instead; the Makefile's relative `--env-file ../../.env` is unaffected.
 | 2026-10-17 | Reconnect over a real socket | `pytest tests/test_reconnect_integration.py` | ✅ 6 passed — connect, configure, drop, reconnect, reconfigure, audio resumes, silent-server timeout |
 | 2026-10-17 | macOS packaging | `make bundle` | ✅ `.app` 24.3 MB, `.dmg` 20.6 MB, self-contained; runs with `PATH=/usr/bin:/bin` |
 | 2026-10-17 | Orphan processes on exit | normal quit, SIGKILL, supervisor death | ✅ 0 orphans on all three **after** fixing a real orphaned-backend bug |
-| 2026-10-17 | Headphone output | capture while default output was a JBL Quantum800 | ✅ peak 7525, −33.2 dBFS — confirms capture taps the application's audio graph, not the output device |
-| 2026-10-17 | Browser audio | throwaway Chrome instance playing a Web Audio tone | ✅ peak 8898, −15.1 dBFS through the per-application filter — the Teams-on-web path works |
-| 2026-10-17 | Intel backend | `make freeze-backend-x86`, then ran it | ✅ x86_64 binary, handshake and `/health` OK under Rosetta |
-| 2026-10-17 | Universal capture helper | `swiftc` per arch + `lipo` | ✅ fat binary, both slices present |
 | 2026-10-17 | Shareable release | `make release` | ✅ `dist/Japanese Live Translator 0.1.0.dmg`, 21 MB; mounted and verified as a recipient would: deep signature valid, backend and capture helper present |
 | 2026-10-17 | Ad-hoc signed app launches | ran the signed bundle | ✅ **after** removing `keychain-access-groups`, which an ad-hoc signature cannot satisfy — macOS SIGKILLed (exit 137) every build that carried it |
 | 2026-10-17 | Keychain still reachable without that entitlement | dummy item + app launch | ✅ backend received the key; dummy removed afterwards |
@@ -349,6 +344,3 @@ advance.
 3. **Full Xcode absent.** Only matters for signing and notarizing a release
    build; SwiftPM itself works with the Command Line Tools.
 4. **`uv` is not on the non-login shell PATH.** See the environment table.
-5. **The Intel build has never been run on an Intel Mac.** Both slices are
-   present and the x86_64 backend runs under Rosetta here, which is a good
-   proxy but not the same thing as a real Intel machine.

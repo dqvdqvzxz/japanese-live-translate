@@ -142,15 +142,6 @@ Rust reads it from Keychain and passes it to the Python child via an
 environment variable on spawn (not argv, which is world-readable via `ps`).
 The renderer receives only a boolean `api_key_present`.
 
-### D-13 Two backends ship, not one universal binary
-
-PyInstaller executables cannot be merged with `lipo`. Each appends an archive
-of architecture-specific shared libraries after the Mach-O, and `lipo` merges
-only the Mach-O — so the merged x86_64 slice starts, then fails trying to
-`dlopen` an arm64 `libpython`. Both binaries are bundled and the Rust shell
-selects by `std::env::consts::ARCH`. The capture helper has no embedded
-payload, so it is a normal fat binary.
-
 ### D-12 The microphone is a second stream, mixed at drain time
 
 ScreenCaptureKit delivers microphone audio as a separate output type on the
