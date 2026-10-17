@@ -16,6 +16,7 @@ file, or a crash dump should not leak either.
 | Local backend | Reached by another local process or a web page | Bound to `127.0.0.1`; per-process random bearer token; strict `Origin` check; CORS denies all browser origins |
 | Local backend | CSRF from a page the user visits | Token is not a cookie, so it is not auto-attached; `Origin` header validated on both HTTP and the WS handshake |
 | Covert recording | App captures without the user knowing | Capture never auto-starts; explicit status in the UI at all times; macOS shows its own recording indicator |
+| Recording the room | Microphone captures the user and anyone nearby | Off by default; the toggle sits beside the source picker, not buried in Settings; macOS asks for Microphone permission separately and shows its own indicator |
 
 ## 2. API key handling
 
@@ -100,6 +101,19 @@ This matters beyond pedantry. Other meeting participants may read that notice
 and rely on it, and a privacy claim that someone relies on has to be true. The
 accurate version is still reassuring: one destination, no storage, no
 telemetry, and capture only on an explicit press of Start.
+
+### The microphone
+
+Capturing an application the user is already listening to is one consent
+question. Capturing the microphone is a different one: it records the user and
+anybody in the room, including people who never agreed to it and may not know
+the app exists.
+
+So it is off by default, the toggle is visible next to the source selector
+rather than hidden in Settings, it cannot be changed mid-session, and macOS
+requires its own Microphone permission with its own indicator. When enabled,
+microphone audio is mixed with the application audio and sent to OpenAI the
+same way — it is not stored, and no audio file is written.
 
 ### What OpenAI receives and retains
 

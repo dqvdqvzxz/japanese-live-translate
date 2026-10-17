@@ -20,15 +20,24 @@ final class AudioTap: NSObject, SCStreamOutput, SCStreamDelegate {
     static let bytesPerSample = 2
 
     private let frameMS: Int
+    private let includeMicrophone: Bool
     private let ring: PCMRing
+    /// A separate ring for the microphone. The two streams arrive on their own
+    /// schedules and from different clocks, so they are buffered apart and
+    /// summed at drain time rather than interleaved as they land.
+    private let micRing: PCMRing
     private let outputFormat: AVAudioFormat
 
     private var stream: SCStream?
     private var converter: AVAudioConverter?
     private var converterInputFormat: AVAudioFormat?
+    private var micConverter: AVAudioConverter?
+    private var micConverterInputFormat: AVAudioFormat?
+    private var micFrames = 0
 
     private let sampleQueue = DispatchQueue(label: "jlt.audiotap.samples",
                                             qos: .userInitiated)
+    private let micQueue = DispatchQueue(label: "jlt.audiotap.mic", qos: .userInitiated)
     private var drainThread: Thread?
     private let stopping = AtomicFlag()
 
@@ -42,10 +51,12 @@ final class AudioTap: NSObject, SCStreamOutput, SCStreamDelegate {
         Int(Self.targetSampleRate) * Self.bytesPerSample * frameMS / 1000
     }
 
-    init(frameMS: Int, ringSeconds: Double = 8.0) {
+    init(frameMS: Int, includeMicrophone: Bool = false, ringSeconds: Double = 8.0) {
         self.frameMS = frameMS
+        self.includeMicrophone = includeMicrophone
         let capacity = Int(Self.targetSampleRate * Double(Self.bytesPerSample) * ringSeconds)
         self.ring = PCMRing(capacity: capacity)
+        self.micRing = PCMRing(capacity: capacity)
         guard let fmt = AVAudioFormat(commonFormat: .pcmFormatInt16,
                                       sampleRate: Self.targetSampleRate,
                                       channels: Self.targetChannels,
@@ -88,8 +99,31 @@ final class AudioTap: NSObject, SCStreamOutput, SCStreamDelegate {
         config.sampleRate = Int(Self.targetSampleRate)
         config.channelCount = Int(Self.targetChannels)
 
+        if includeMicrophone {
+            if #available(macOS 15.0, *) {
+                config.captureMicrophone = true
+            } else {
+                Control.warning(
+                    code: "microphone_unsupported",
+                    message: "Microphone capture needs macOS 15 or later; continuing with application audio only."
+                )
+            }
+        }
+
         let stream = SCStream(filter: filter, configuration: config, delegate: self)
         try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: sampleQueue)
+        if includeMicrophone, #available(macOS 15.0, *) {
+            do {
+                try stream.addStreamOutput(self, type: .microphone, sampleHandlerQueue: micQueue)
+            } catch {
+                // Losing the microphone should not lose the meeting: carry on
+                // with application audio and say what happened.
+                Control.warning(
+                    code: "microphone_unavailable",
+                    message: "Could not start microphone capture: \(error.localizedDescription)"
+                )
+            }
+        }
         try await stream.startCapture()
         self.stream = stream
 
@@ -107,7 +141,8 @@ final class AudioTap: NSObject, SCStreamOutput, SCStreamDelegate {
         drainThread?.cancel()
         flushRemaining()
         Control.stopped(frames: framesWritten,
-                        dropped: ring.droppedBytes / max(1, frameBytes))
+                        dropped: (ring.droppedBytes + micRing.droppedBytes)
+                            / max(1, frameBytes))
     }
 
     // MARK: - stdout drain
@@ -121,7 +156,7 @@ final class AudioTap: NSObject, SCStreamOutput, SCStreamDelegate {
             guard let self else { return }
             let handle = FileHandle.standardOutput
             while !Thread.current.isCancelled && !self.stopping.value {
-                let chunk = self.ring.read(max: self.frameBytes * 8)
+                let chunk = self.nextChunk()
                 if chunk.isEmpty {
                     usleep(useconds_t(self.frameMS * 500)) // half a frame
                     continue
@@ -131,15 +166,78 @@ final class AudioTap: NSObject, SCStreamOutput, SCStreamDelegate {
             }
         }
         thread.name = "jlt.audiotap.drain"
-        thread.qualityOfService = .userInitiated
+        thread.qualityOfService = QualityOfService.userInitiated
         thread.start()
         drainThread = thread
+    }
+
+    /// One chunk of output, mixing the application and microphone rings.
+    ///
+    /// The two streams run on independent clocks, so they are never perfectly
+    /// aligned. Rather than try to synchronise them, each is buffered on its
+    /// own and whatever is available is summed; a stream that is quiet or
+    /// absent simply contributes nothing. Drift stays bounded by the rings'
+    /// drop-oldest policy, which matters over a long meeting.
+    ///
+    /// Sums are clamped rather than allowed to wrap: a wrapped overflow turns
+    /// a loud moment into white noise, which is far worse for transcription
+    /// than a clipped peak.
+    private func nextChunk() -> [UInt8] {
+        let limit = frameBytes * 8
+        let appChunk = ring.read(max: limit)
+        guard includeMicrophone else {
+            meter(appChunk)
+            return appChunk
+        }
+
+        let micChunk = micRing.read(max: limit)
+        if micChunk.isEmpty {
+            meter(appChunk)
+            return appChunk
+        }
+        if appChunk.isEmpty {
+            meter(micChunk)
+            return micChunk
+        }
+
+        let pairs = min(appChunk.count, micChunk.count) / 2
+        var mixed = [UInt8](repeating: 0, count: max(appChunk.count, micChunk.count))
+
+        appChunk.withUnsafeBytes { a in
+            micChunk.withUnsafeBytes { m in
+                mixed.withUnsafeMutableBytes { out in
+                    let aS = a.bindMemory(to: Int16.self)
+                    let mS = m.bindMemory(to: Int16.self)
+                    let oS = out.bindMemory(to: Int16.self)
+                    for i in 0..<pairs {
+                        let sum = Int32(aS[i]) + Int32(mS[i])
+                        oS[i] = Int16(max(-32768, min(32767, sum)))
+                    }
+                    // Whichever stream was longer contributes its tail alone.
+                    let longer = appChunk.count >= micChunk.count ? aS : mS
+                    if pairs < oS.count {
+                        for i in pairs..<oS.count { oS[i] = longer[i] }
+                    }
+                }
+            }
+        }
+        meter(mixed)
+        return mixed
+    }
+
+    /// Report the level of what is actually being sent.
+    private func meter(_ chunk: [UInt8]) {
+        guard !chunk.isEmpty else { return }
+        chunk.withUnsafeBytes { raw in
+            let samples = raw.bindMemory(to: Int16.self)
+            emitLevelIfDue(samples, frames: samples.count)
+        }
     }
 
     private func flushRemaining() {
         let handle = FileHandle.standardOutput
         while true {
-            let chunk = ring.read(max: frameBytes * 8)
+            let chunk = nextChunk()
             if chunk.isEmpty { break }
             handle.write(Data(chunk))
             framesWritten += chunk.count / frameBytes
@@ -151,7 +249,13 @@ final class AudioTap: NSObject, SCStreamOutput, SCStreamDelegate {
     func stream(_ stream: SCStream,
                 didOutputSampleBuffer sampleBuffer: CMSampleBuffer,
                 of type: SCStreamOutputType) {
-        guard type == .audio, CMSampleBufferDataIsReady(sampleBuffer) else { return }
+        guard CMSampleBufferDataIsReady(sampleBuffer) else { return }
+
+        if #available(macOS 15.0, *), type == .microphone {
+            handleMicrophone(sampleBuffer)
+            return
+        }
+        guard type == .audio else { return }
         guard let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer),
               let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(formatDescription) else {
             return
@@ -182,6 +286,60 @@ final class AudioTap: NSObject, SCStreamOutput, SCStreamDelegate {
         }
     }
 
+    @available(macOS 15.0, *)
+    private func handleMicrophone(_ sampleBuffer: CMSampleBuffer) {
+        guard let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer),
+              let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(formatDescription)
+        else { return }
+
+        var streamDescription = asbd.pointee
+        guard let inputFormat = AVAudioFormat(streamDescription: &streamDescription) else { return }
+
+        if micConverterInputFormat != inputFormat {
+            micConverter = AVAudioConverter(from: inputFormat, to: outputFormat)
+            micConverter?.sampleRateConverterQuality = AVAudioQuality.high.rawValue
+            micConverterInputFormat = inputFormat
+        }
+        guard let micConverter else { return }
+
+        try? sampleBuffer.withAudioBufferList { audioBufferList, _ in
+            guard let input = AVAudioPCMBuffer(pcmFormat: inputFormat,
+                                               bufferListNoCopy: audioBufferList.unsafePointer)
+            else { return }
+            guard let output = convert(input, using: micConverter) else { return }
+            let byteCount = Int(output.frameLength) * Self.bytesPerSample
+            guard let channelData = output.int16ChannelData else { return }
+            _ = channelData[0].withMemoryRebound(to: UInt8.self, capacity: byteCount) { raw in
+                micRing.write(UnsafeRawBufferPointer(start: raw, count: byteCount))
+            }
+            micFrames += 1
+        }
+    }
+
+    /// Shared conversion to 24 kHz mono int16, used by both inputs.
+    private func convert(_ input: AVAudioPCMBuffer,
+                         using converter: AVAudioConverter) -> AVAudioPCMBuffer? {
+        let ratio = outputFormat.sampleRate / input.format.sampleRate
+        let capacity = AVAudioFrameCount(Double(input.frameLength) * ratio) + 32
+        guard capacity > 0,
+              let output = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: capacity)
+        else { return nil }
+
+        var consumed = false
+        var conversionError: NSError?
+        let status = converter.convert(to: output, error: &conversionError) { _, outStatus in
+            if consumed {
+                outStatus.pointee = .noDataNow
+                return nil
+            }
+            consumed = true
+            outStatus.pointee = .haveData
+            return input
+        }
+        guard status != .error, output.frameLength > 0 else { return nil }
+        return output
+    }
+
     private func convertAndEnqueue(_ input: AVAudioPCMBuffer, using converter: AVAudioConverter) {
         let ratio = outputFormat.sampleRate / input.format.sampleRate
         // +32 frames of slack absorbs the resampler's fractional carry.
@@ -210,12 +368,11 @@ final class AudioTap: NSObject, SCStreamOutput, SCStreamDelegate {
             ring.write(UnsafeRawBufferPointer(start: raw, count: byteCount))
         }
 
-        emitLevelIfDue(channelData[0], frames: Int(output.frameLength))
     }
 
     // MARK: - Level metering and silence detection
 
-    private func emitLevelIfDue(_ samples: UnsafeMutablePointer<Int16>, frames: Int) {
+    private func emitLevelIfDue(_ samples: UnsafeBufferPointer<Int16>, frames: Int) {
         guard frames > 0 else { return }
         var sumSquares = 0.0
         for i in 0..<frames {

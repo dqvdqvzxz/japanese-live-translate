@@ -32,6 +32,8 @@ interface Props {
   onToggleAlwaysOnTop: () => void;
   settingsOpen: boolean;
   onOpenSettings: () => void;
+  includeMicrophone: boolean;
+  onToggleMicrophone: () => void;
 }
 
 export function Controls({
@@ -39,6 +41,7 @@ export function Controls({
   sources, selected, onSelect, capture, busy, alwaysOnTop,
   onStart, onStop, onPause, onResume, onToggleAlwaysOnTop,
   settingsOpen, onOpenSettings,
+  includeMicrophone, onToggleMicrophone,
 }: Props) {
   const running = capture === "running";
   const paused = capture === "paused";
@@ -94,6 +97,18 @@ export function Controls({
           Stop
         </button>
       )}
+
+      {/* Beside the source, not buried in Settings: it changes what is being
+          recorded, so it should be visible while choosing what to record. */}
+      <label className="controls__mic" title="Cũng thu cả microphone và trộn vào">
+        <input
+          type="checkbox"
+          checked={includeMicrophone}
+          disabled={active || busy}
+          onChange={onToggleMicrophone}
+        />
+        Mic
+      </label>
 
       <span className="controls__spacer" />
 

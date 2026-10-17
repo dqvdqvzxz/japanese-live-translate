@@ -30,6 +30,9 @@ def main() -> int:
     parser.add_argument("--rate", default="24000")
     parser.add_argument("--channels", default="1")
     parser.add_argument("--frame-ms", default="20")
+    # Mirrors the real helper: a fake that rejects a flag the app actually
+    # sends would fail for a reason the app never would.
+    parser.add_argument("--mic", action="store_true")
     args = parser.parse_args()
 
     mode = os.environ.get("FAKE_HELPER_MODE", "ok")
@@ -80,7 +83,7 @@ def main() -> int:
     if mode == "never_starts":
         time.sleep(60)
         return 1
-    emit(type="started", source_id=args.capture, name="Microsoft Teams")
+    emit(type="started", source_id=args.capture, name="Microsoft Teams", mic=args.mic)
 
     stop = False
 

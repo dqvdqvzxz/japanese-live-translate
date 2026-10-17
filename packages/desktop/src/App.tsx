@@ -21,6 +21,7 @@ const FALLBACK_SETTINGS: Settings = {
   segmentation: {},
   vad: {},
   ui: { theme: "system", font_size: 18, always_on_top: true, show_partials: true },
+  audio: { include_microphone: false },
   privacy: { persist_transcripts: false, transcript_folder: null, persist_audio: false },
   api_key_present: false,
 };
@@ -272,6 +273,12 @@ export default function App() {
         onResume={() => client && run(() => client.resume())}
         onToggleAlwaysOnTop={toggleAlwaysOnTop}
         settingsOpen={panel === "settings"}
+        includeMicrophone={settings?.audio.include_microphone ?? false}
+        onToggleMicrophone={() =>
+          patchSettings({
+            audio: { include_microphone: !(settings?.audio.include_microphone ?? false) },
+          })
+        }
         onOpenSettings={() => setPanel(panel === "settings" ? "none" : "settings")}
       />
 

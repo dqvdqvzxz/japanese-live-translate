@@ -193,6 +193,7 @@ class FakeCapture:
         self.started = False
         self.stopped = False
         self.start_calls = 0
+        self.include_microphone = False
         self._release = asyncio.Event()
 
     async def list_sources(self):
@@ -207,10 +208,11 @@ class FakeCapture:
             )
         ]
 
-    async def start(self, source_id: str):
+    async def start(self, source_id: str, *, include_microphone: bool = False):
         from jlt.models import AudioSource
 
         self.start_calls += 1
+        self.include_microphone = include_microphone
         if self._fail_start is not None:
             raise self._fail_start
         self.started = True

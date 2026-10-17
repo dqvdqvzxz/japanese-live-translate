@@ -63,8 +63,12 @@ You need an OpenAI project with access to `gpt-live-transcribe` and
 1. Pick the application playing the meeting audio — **Microsoft Teams** for the
    desktop app, your **browser** for Teams on the web, or **Entire system
    audio** if unsure.
-2. Press **Start**.
-3. Japanese appears as it is spoken; Vietnamese appears underneath each
+2. If the Japanese is being spoken **in the room** rather than coming out of
+   the app — an in-person meeting, or a speakerphone — tick **Mic** beside the
+   source. macOS will ask for Microphone permission the first time. This also
+   records you and anyone near you, so it is off until you turn it on.
+3. Press **Start**.
+4. Japanese appears as it is spoken; Vietnamese appears underneath each
    finished sentence.
 
 The bar at the bottom always shows whether audio is being captured, and the

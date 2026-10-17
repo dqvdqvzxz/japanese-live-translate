@@ -53,6 +53,7 @@ export interface StoredSegment {
 }
 
 export interface Settings {
+  audio: { include_microphone: boolean };
   stt: { delay: string; languages: string[]; prompt: string | null };
   translation: Record<string, unknown>;
   segmentation: Record<string, unknown>;

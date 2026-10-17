@@ -142,6 +142,21 @@ Rust reads it from Keychain and passes it to the Python child via an
 environment variable on spawn (not argv, which is world-readable via `ps`).
 The renderer receives only a boolean `api_key_present`.
 
+### D-12 The microphone is a second stream, mixed at drain time
+
+ScreenCaptureKit delivers microphone audio as a separate output type on the
+same stream, on its own clock. The two are buffered in separate rings and
+summed when the drain thread reads, rather than interleaved as they arrive:
+alignment between two clocks is not achievable, and for speech it does not
+need to be. Whichever stream is quiet contributes nothing; drift stays bounded
+by each ring's drop-oldest policy. Sums are clamped, because a wrapped
+overflow turns a loud moment into white noise — far worse for transcription
+than a clipped peak.
+
+The level meter reads the mixed result, not the application stream. Metering
+only the latter reported silence while the microphone carried real audio,
+which is precisely when a user looks at the meter.
+
 ### D-11 Per-application capture includes helper processes
 
 Electron-style apps render in separate helper processes: a Teams meeting runs

@@ -179,7 +179,9 @@ class SessionManager:
     async def _build(self, settings: Settings, source_id: str) -> None:
         capture = self._capture_factory()
         self._capture = capture
-        self.source = await capture.start(source_id)
+        self.source = await capture.start(
+            source_id, include_microphone=settings.audio.include_microphone
+        )
 
         stt = self._stt_factory(settings)
         self._stt = stt

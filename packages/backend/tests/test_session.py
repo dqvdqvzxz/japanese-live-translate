@@ -374,3 +374,20 @@ async def test_the_heartbeat_reports_counters_and_no_content(tmp_path, caplog):
     assert hasattr(record, "level_dbfs") and hasattr(record, "stt")
     assert "機密" not in str(record.__dict__), "the heartbeat must carry no content"
     await session.stop()
+
+
+async def test_the_microphone_is_off_unless_the_user_turns_it_on(tmp_path):
+    """Recording the room is a different consent question from capturing an
+    application the user is already listening to."""
+    session, _, capture, _ = build(tmp_path)
+    await session.start("app:x")
+    assert capture.include_microphone is False
+    await session.stop()
+
+
+async def test_the_microphone_setting_reaches_the_capture_helper(tmp_path):
+    session, _, capture, _ = build(tmp_path)
+    session._settings_manager.update({"audio": {"include_microphone": True}})
+    await session.start("app:x")
+    assert capture.include_microphone is True
+    await session.stop()

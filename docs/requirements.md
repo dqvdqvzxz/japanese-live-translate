@@ -33,7 +33,9 @@ Teams meetings, on a low-resource Mac.
   and Teams in a browser (Chrome, Edge, Safari, Firefox bundle IDs).
 - FR-1.3 Work when output is routed to headphones (ScreenCaptureKit taps the
   app's audio graph, not the speaker, so headphone routing is irrelevant).
-- FR-1.4 Exclude microphone input by default; it is never captured in v1.
+- FR-1.4 Exclude microphone input by default. It may be enabled explicitly,
+  in which case it is mixed with the application audio (macOS 15+). The
+  control is beside the source picker and is locked while capturing.
 - FR-1.5 Emit mono 24 kHz signed 16-bit little-endian PCM — the only format the
   STT model accepts.
 - FR-1.6 Never block the audio render callback. Conversion and IPC happen off

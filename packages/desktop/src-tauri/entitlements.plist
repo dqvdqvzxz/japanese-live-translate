@@ -11,6 +11,10 @@
   <!-- Outbound only, to api.openai.com. No server socket beyond loopback. -->
   <key>com.apple.security.network.client</key>
   <true/>
+  <!-- Microphone, for the optional mix with application audio. Off by default
+       and requested only when the user enables it. -->
+  <key>com.apple.security.device.audio-input</key>
+  <true/>
   <!-- No keychain-access-groups entitlement.
        It is only needed to SHARE a keychain item between several apps, which
        this app does not do: it reads and writes its own item in the default

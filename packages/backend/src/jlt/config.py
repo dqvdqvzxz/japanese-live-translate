@@ -108,6 +108,18 @@ class VadSettings(BaseModel):
     max_turn_ms: int = Field(default=12_000, ge=1000)
 
 
+class AudioSettings(BaseModel):
+    """What the capture helper listens to.
+
+    The microphone is off by default. It records the user and everyone in the
+    room, which is a different consent question from capturing an application
+    the user is already listening to — so it is a deliberate choice, surfaced
+    next to the source picker rather than buried.
+    """
+
+    include_microphone: bool = False
+
+
 class UiSettings(BaseModel):
     theme: Theme = "system"
     font_size: int = Field(default=18, ge=10, le=48)
@@ -135,6 +147,7 @@ class PrivacySettings(BaseModel):
 
 
 class Settings(BaseModel):
+    audio: AudioSettings = Field(default_factory=AudioSettings)
     stt: SttSettings = Field(default_factory=SttSettings)
     translation: TranslationSettings = Field(default_factory=TranslationSettings)
     segmentation: SegmentationSettings = Field(default_factory=SegmentationSettings)

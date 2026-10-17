@@ -15,6 +15,7 @@ struct Options {
     var listSources = false
     var sourceID: String?
     var frameMS = 20
+    var includeMicrophone = false
 }
 
 func parseArguments(_ argv: [String]) -> Options? {
@@ -28,6 +29,8 @@ func parseArguments(_ argv: [String]) -> Options? {
             index += 1
             guard index < argv.count else { return nil }
             options.sourceID = argv[index]
+        case "--mic":
+            options.includeMicrophone = true
         case "--frame-ms":
             index += 1
             guard index < argv.count, let value = Int(argv[index]), value > 0 else { return nil }
@@ -56,7 +59,10 @@ func usage() {
     FileHandle.standardError.write(Data("""
     usage:
       teams-audio-tap --list-sources
-      teams-audio-tap --capture <source-id> [--rate 24000] [--channels 1] [--frame-ms 20]
+      teams-audio-tap --capture <source-id> [--mic] [--rate 24000] [--channels 1] [--frame-ms 20]
+
+      --mic  also capture the microphone and mix it with the application audio
+             (macOS 15 or later)
 
     """.utf8))
 }
@@ -80,8 +86,8 @@ func runList() async -> Never {
     }
 }
 
-func runCapture(sourceID: String, frameMS: Int) async -> Never {
-    let tap = AudioTap(frameMS: frameMS)
+func runCapture(sourceID: String, frameMS: Int, includeMicrophone: Bool) async -> Never {
+    let tap = AudioTap(frameMS: frameMS, includeMicrophone: includeMicrophone)
     Control.ready(rate: Int(AudioTap.targetSampleRate),
                   channels: Int(AudioTap.targetChannels),
                   frameBytes: tap.frameBytes)
@@ -138,7 +144,9 @@ let task = Task {
     if options.listSources {
         await runList()
     } else {
-        await runCapture(sourceID: options.sourceID!, frameMS: options.frameMS)
+        await runCapture(sourceID: options.sourceID!,
+                         frameMS: options.frameMS,
+                         includeMicrophone: options.includeMicrophone)
     }
 }
 _ = task

@@ -127,7 +127,7 @@ class AudioCaptureService:
 
     # -- lifecycle ----------------------------------------------------------
 
-    async def start(self, source_id: str) -> AudioSource:
+    async def start(self, source_id: str, *, include_microphone: bool = False) -> AudioSource:
         if self._process is not None:
             raise CaptureError("already_running", "Capture is already running.")
 
@@ -137,7 +137,7 @@ class AudioCaptureService:
                 f"Audio helper not found at {self._helper}. Run `make capture-build`.",
             )
 
-        self._process = await asyncio.create_subprocess_exec(
+        arguments = [
             str(self._helper),
             "--capture",
             source_id,
@@ -147,6 +147,12 @@ class AudioCaptureService:
             str(CHANNELS),
             "--frame-ms",
             str(self._frame_ms),
+        ]
+        if include_microphone:
+            arguments.append("--mic")
+
+        self._process = await asyncio.create_subprocess_exec(
+            *arguments,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             # The key is not in this child's environment; it has no need for it.

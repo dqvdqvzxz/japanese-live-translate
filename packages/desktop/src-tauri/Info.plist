@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- macOS shows these strings in the permission prompts, so they say what
+       the app does with each input rather than restating the obvious. -->
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Japanese Live Translator mixes your microphone with the meeting audio so speech in the room can be subtitled. The microphone is off until you turn it on, and audio is never saved.</string>
+  <key>NSAudioCaptureUsageDescription</key>
+  <string>Japanese Live Translator captures the audio of the application you choose so it can be transcribed and translated.</string>
+</dict>
+</plist>

@@ -505,3 +505,11 @@ body {
   font-family: ui-monospace, monospace; font-size: 10px;
   overflow-wrap: anywhere;
 }
+
+.controls__mic {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 11px; color: var(--fg-dim); cursor: pointer; user-select: none;
+}
+.controls__mic input { margin: 0; cursor: pointer; }
+.controls__mic:has(input:checked) { color: var(--accent); font-weight: 500; }
+.controls__mic:has(input:disabled) { color: var(--fg-faint); cursor: not-allowed; }

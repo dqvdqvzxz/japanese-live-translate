@@ -7,6 +7,7 @@ Python side is responsible for.
 
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
 from pathlib import Path
@@ -157,3 +158,26 @@ async def test_every_source_entry_has_the_full_key_set(shim: Path):
     for source in sources:
         dumped = source.model_dump()
         assert set(dumped) == {"id", "kind", "name", "bundle_id", "pid", "is_recommended"}
+
+
+async def test_the_mic_flag_is_passed_only_when_asked(shim: Path, monkeypatch):
+    """The helper must not be told to record the room by accident."""
+    recorded: list[list[str]] = []
+    real = asyncio.create_subprocess_exec
+
+    async def spy(*args, **kwargs):
+        recorded.append(list(args))
+        return await real(*args, **kwargs)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", spy)
+    os.environ["FAKE_HELPER_MODE"] = "ok"
+
+    svc = AudioCaptureService(helper_path=shim)
+    await svc.start("app:x")
+    await svc.stop()
+    assert "--mic" not in recorded[-1]
+
+    svc = AudioCaptureService(helper_path=shim)
+    await svc.start("app:x", include_microphone=True)
+    await svc.stop()
+    assert "--mic" in recorded[-1]
