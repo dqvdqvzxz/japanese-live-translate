@@ -162,6 +162,8 @@ Every figure below came from a command that ran. Nothing here is estimated;
 | End to end | p50 4120 ms, p95 4843 ms |
 | 60-minute run | 60.2 min, RSS 17.0 → 5.5 MB, 0 orphans, 1 auto-recovered reconnect |
 | Teams audio capture | peak 25053, −23.7 dBFS |
+| Browser audio capture | peak 8898, −15.1 dBFS (Chrome) |
+| Capture with headphone output | peak 7525, −33.2 dBFS |
 | Release artifact | 24.4 MB app, 21 MB dmg |
 
 ### Still unverified
@@ -171,7 +173,8 @@ Every figure below came from a command that ran. Nothing here is estimated;
   quality* says nothing about Japanese.
 - Window dragging by hand — the capability it needed is fixed and verified in
   the generated ACL, but a native drag cannot be automated.
-- Headphones, Teams in a browser with audio actually playing, and Intel Macs.
+- Intel Macs and Windows. The macOS build is Apple Silicon only; Windows
+  would need the ScreenCaptureKit helper rewritten against WASAPI loopback.
 - Code signing and notarization, which need a paid Apple Developer ID.
 
 ## 8. What changed from the brief
