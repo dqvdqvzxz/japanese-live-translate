@@ -95,6 +95,45 @@ largest term in end-to-end latency for short utterances.** Tuning
 `incomplete_flush_ms` is the highest-leverage knob, and it is a direct
 latency-versus-quality trade. This had not been obvious before measuring.
 
+### 60-minute continuous operation — `make stability MINUTES=60`
+
+Real capture helper, real OpenAI transcription socket, Teams as the source,
+2026-10-17. Raw samples in [stability-60min.csv](stability-60min.csv).
+
+| Metric | Result | Target |
+|---|---|---|
+| Duration | **3609.7 s (60.2 min)**, backend never died | ≥ 60 min ✅ |
+| Resident memory, minute 5 → minute 60 | 17,024 KB → **5,472 KB** (−11.5 MB) | no growth ✅ |
+| Peak resident memory | 18.1 MB | — |
+| Capture helper processes | exactly 1, for the whole hour | 1 |
+| Orphan processes after stop | **0** | 0 |
+| Reconnects | 1, recovered automatically | — |
+| Cost | ~$0 — silence is not forwarded | — |
+
+Memory did not merely stay flat, it fell: the peak is startup allocation that
+Python returns afterwards. There is no leak over an hour.
+
+#### The run found something worth knowing
+
+At minute 39 the OpenAI connection dropped on its own —
+`ConnectionClosedError` after about 38.6 minutes of an idle session — and the
+provider reconnected **1.2 seconds later** without intervention. Nothing in the
+session was lost and the helper was untouched.
+
+This is the first evidence that **OpenAI drops an idle realtime transcription
+session**, which makes automatic reconnection a requirement for long meetings
+rather than defensive programming. A quiet stretch in a two-hour meeting would
+otherwise silently end transcription. It also validates the reconnect path
+against the real service rather than only against a local test server.
+
+#### Scope of this test
+
+It ran against a **quiet** source, so no audio was sent and no transcription
+happened. It measures process lifetime, memory, the capture helper, the event
+loop and the realtime socket over an hour. It is **not** a test of sustained
+transcription throughput, and the latency figures above come from the separate
+runs, not from this one.
+
 ### Translation stage — `make eval-translation`
 
 All 18 golden cases, run serially with rolling context, exactly as the pipeline

@@ -224,7 +224,7 @@ stream.
 | Test with headphones | ⛔ manual — hardware |
 | Network interruption and reconnection | ✅ 6 tests against a real local WebSocket server |
 | Latency benchmarks | ✅ recorded in `docs/benchmarks.md` |
-| 60-minute continuous run | 🟡 in progress — `make stability MINUTES=60` |
+| 60-minute continuous run | ✅ 60.2 min, no leak, 0 orphans, 1 auto-recovered reconnect |
 | Package a macOS application | ✅ self-contained `.app` (24.3 MB) and `.dmg` (20.6 MB) |
 | Installation and usage documentation | ✅ `docs/installation.md` |
 | Code signing and notarization | ⛔ needs an Apple Developer ID |
@@ -297,6 +297,7 @@ instead; the Makefile's relative `--env-file ../../.env` is unaffected.
 | 2026-10-17 | Phase 5 lint + types | `ruff`, `mypy --strict`, `eslint`, `tsc`, `cargo clippy -D warnings`, `cargo fmt --check` | All clean |
 | 2026-10-17 | Live backend process | `python -m jlt` + curl | ✅ handshake, auth, origin, loopback-only bind, no key leak |
 | 2026-10-17 | Live session on real Teams | `POST /api/session/start` then `/stop` | ✅ helper spawned, STT connected, `no_audio` warning correct, **0 orphans and 0 sockets after stop** |
+| 2026-10-17 | 60-minute stability run | `make stability MINUTES=60` | ✅ 60.2 min; RSS 17.0 MB → 5.5 MB (no leak); exactly 1 helper throughout; 0 orphans after stop; **OpenAI dropped the idle session at minute 39 and the provider recovered in 1.2 s unaided** |
 | 2026-10-17 | Reconnect over a real socket | `pytest tests/test_reconnect_integration.py` | ✅ 6 passed — connect, configure, drop, reconnect, reconfigure, audio resumes, silent-server timeout |
 | 2026-10-17 | macOS packaging | `make bundle` | ✅ `.app` 24.3 MB, `.dmg` 20.6 MB, self-contained; runs with `PATH=/usr/bin:/bin` |
 | 2026-10-17 | Orphan processes on exit | normal quit, SIGKILL, supervisor death | ✅ 0 orphans on all three **after** fixing a real orphaned-backend bug |
@@ -316,7 +317,10 @@ advance.
    real audio (see `docs/benchmarks.md`), but that run captured unrelated
    system audio rather than Japanese. A valid content test needs Japanese
    audio playing with nothing else making sound.
-2. **Segmentation dominates end-to-end latency for short utterances** —
+2. **OpenAI drops idle realtime sessions** — observed once after ~38.6 minutes
+   of silence. Recovery is automatic and took 1.2 s, but it means reconnection
+   is load-bearing for long meetings, not a safety net.
+3. **Segmentation dominates end-to-end latency for short utterances** —
    roughly 2.2 s of the 4.1 s p50. `incomplete_flush_ms` is the knob; it is a
    latency-versus-quality trade and needs tuning against real meeting speech.
 2. **Spoken identifiers do not survive STT as written identifiers.**
