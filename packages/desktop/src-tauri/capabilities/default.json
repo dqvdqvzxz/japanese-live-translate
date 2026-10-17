@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Core permissions the renderer needs. Custom commands registered in invoke_handler do not need to be listed here; core commands do, and without this file they fail silently — which is exactly how window dragging appeared to be broken.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-set-always-on-top",
+    "core:window:allow-set-focus"
+  ]
+}

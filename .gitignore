@@ -35,3 +35,6 @@ packages/desktop/src-tauri/target/
 # PyInstaller output
 packages/backend/build/
 packages/backend/dist/
+
+# Tauri generated ACL schemas
+packages/desktop/src-tauri/gen/

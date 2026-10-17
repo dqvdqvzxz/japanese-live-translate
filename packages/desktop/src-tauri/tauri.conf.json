@@ -21,7 +21,8 @@
         "alwaysOnTop": false,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
-        "resizable": true
+        "resizable": true,
+        "label": "main"
       }
     ],
     "security": {
