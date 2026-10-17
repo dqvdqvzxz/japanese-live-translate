@@ -171,6 +171,11 @@ make bundle    # the .app and Tauri's own .dmg
 make release   # ad-hoc signs everything and builds a shareable .dmg in dist/
 ```
 
+Tauri is configured to build the `.app` only. Its own DMG step drives Finder
+through AppleScript and fails with "Finder is busy" whenever any disk image is
+mounted; `package_release.sh` builds the image with `hdiutil`, which has no
+such dependency.
+
 `make release` is the one to use for giving the app to somebody else: it signs
 the whole tree including the backend and capture helper in `Resources/`
 (without that the nested signatures disagree and another Mac calls the app

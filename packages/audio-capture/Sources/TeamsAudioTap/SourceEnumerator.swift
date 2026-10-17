@@ -17,7 +17,10 @@ enum KnownSources {
         "com.brave.Browser",
         "company.thebrowser.Browser"
     ]
-    static var recommended: Set<String> { teams.union(browsers) }
+    /// Starred in the picker. Only Teams: it is what this app is for, and
+    /// starring every browser as well made the list of "recommended" sources
+    /// long enough to stop recommending anything.
+    static var recommended: Set<String> { teams }
 }
 
 struct SourceDescriptor: Encodable {
