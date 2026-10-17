@@ -227,6 +227,7 @@ stream.
 | 60-minute continuous run | ✅ 60.2 min, no leak, 0 orphans, 1 auto-recovered reconnect |
 | Package a macOS application | ✅ self-contained `.app` (24.3 MB) and `.dmg` (20.6 MB) |
 | Installation and usage documentation | ✅ `docs/installation.md` |
+| API key entry in the packaged app | ✅ Keychain input in Settings, with restart |
 | Code signing and notarization | ⛔ needs an Apple Developer ID |
 
 **Acceptance: PARTIALLY MET.** Everything that can be verified on this machine
@@ -297,6 +298,7 @@ instead; the Makefile's relative `--env-file ../../.env` is unaffected.
 | 2026-10-17 | Phase 5 lint + types | `ruff`, `mypy --strict`, `eslint`, `tsc`, `cargo clippy -D warnings`, `cargo fmt --check` | All clean |
 | 2026-10-17 | Live backend process | `python -m jlt` + curl | ✅ handshake, auth, origin, loopback-only bind, no key leak |
 | 2026-10-17 | Live session on real Teams | `POST /api/session/start` then `/stop` | ✅ helper spawned, STT connected, `no_audio` warning correct, **0 orphans and 0 sockets after stop** |
+| 2026-10-17 | Packaged app connects to its own backend | launched the `.app`, read its log | ✅ `WebSocket /ws [accepted]` — real backend, not the mock stream — **after** fixing two bugs that made the packaged build unusable |
 | 2026-10-17 | 60-minute stability run | `make stability MINUTES=60` | ✅ 60.2 min; RSS 17.0 MB → 5.5 MB (no leak); exactly 1 helper throughout; 0 orphans after stop; **OpenAI dropped the idle session at minute 39 and the provider recovered in 1.2 s unaided** |
 | 2026-10-17 | Reconnect over a real socket | `pytest tests/test_reconnect_integration.py` | ✅ 6 passed — connect, configure, drop, reconnect, reconfigure, audio resumes, silent-server timeout |
 | 2026-10-17 | macOS packaging | `make bundle` | ✅ `.app` 24.3 MB, `.dmg` 20.6 MB, self-contained; runs with `PATH=/usr/bin:/bin` |

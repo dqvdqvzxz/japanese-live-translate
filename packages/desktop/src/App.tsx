@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { BackendClient, resolveBackend, type Settings } from "./api/client";
 import { startMockStream } from "./api/mock";
+import { setAlwaysOnTop } from "./api/tauri";
 import { Controls } from "./components/Controls";
 import { HistoryPanel } from "./components/HistoryPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
@@ -143,10 +144,7 @@ export default function App() {
   const toggleAlwaysOnTop = useCallback(() => {
     const next = !(settings?.ui.always_on_top ?? true);
     patchSettings({ ui: { always_on_top: next } });
-    const tauri = (window as unknown as {
-      __TAURI__?: { core?: { invoke(cmd: string, args: unknown): Promise<void> } };
-    }).__TAURI__;
-    void tauri?.core?.invoke("set_always_on_top", { enabled: next });
+    void setAlwaysOnTop(next);
   }, [settings, patchSettings]);
 
   const fontSize = settings?.ui.font_size ?? 18;

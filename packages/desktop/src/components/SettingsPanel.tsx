@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { Settings } from "../api/client";
+import { clearApiKey, isDesktop, relaunch, storeApiKey } from "../api/tauri";
 
 interface Props {
   settings: Settings | null;
@@ -19,6 +20,9 @@ const DELAYS = ["minimal", "low", "medium", "high", "xhigh"] as const;
  */
 export function SettingsPanel({ settings, onPatch, onClose, onClearHistory }: Props) {
   const [confirmPersist, setConfirmPersist] = useState(false);
+  const [keyInput, setKeyInput] = useState("");
+  const [keyState, setKeyState] = useState<"idle" | "saving" | "saved" | "removed">("idle");
+  const [keyError, setKeyError] = useState<string | null>(null);
   if (!settings) return null;
 
   const ui = settings.ui;
@@ -134,12 +138,93 @@ export function SettingsPanel({ settings, onPatch, onClose, onClearHistory }: Pr
       </section>
 
       <section className="panel__section">
-        <h3>OpenAI</h3>
+        <h3>OpenAI API key</h3>
         <p className="panel__hint">
           {settings.api_key_present
-            ? "An API key is stored in your macOS Keychain."
-            : "No API key stored. Capture cannot start without one."}
+            ? "A key is stored in your macOS Keychain."
+            : "No key stored. Capture cannot start without one."}
         </p>
+
+        {isDesktop() ? (
+          <>
+            <label>
+              {settings.api_key_present ? "Replace the key" : "Paste your key"}
+              <input
+                type="password"
+                value={keyInput}
+                placeholder="sk-…"
+                autoComplete="off"
+                spellCheck={false}
+                onChange={(e) => {
+                  setKeyInput(e.target.value);
+                  setKeyState("idle");
+                }}
+              />
+            </label>
+            <p className="panel__hint">
+              The key goes straight to your Keychain. It is never written to a
+              file and never reaches this window again.
+            </p>
+            <div className="panel__row">
+              <button
+                className="btn btn--primary"
+                disabled={!keyInput.trim() || keyState === "saving"}
+                onClick={async () => {
+                  setKeyState("saving");
+                  try {
+                    await storeApiKey(keyInput.trim());
+                    // Overwrite the copy held in this component immediately.
+                    setKeyInput("");
+                    setKeyState("saved");
+                  } catch (error) {
+                    setKeyError(String(error));
+                    setKeyState("idle");
+                  }
+                }}
+              >
+                Save to Keychain
+              </button>
+              {settings.api_key_present && (
+                <button
+                  className="btn"
+                  onClick={async () => {
+                    try {
+                      await clearApiKey();
+                      setKeyState("removed");
+                    } catch (error) {
+                      setKeyError(String(error));
+                    }
+                  }}
+                >
+                  Remove
+                </button>
+              )}
+            </div>
+
+            {keyError && <p className="panel__error">{keyError}</p>}
+
+            {(keyState === "saved" || keyState === "removed") && (
+              <div className="panel__confirm">
+                {keyState === "saved" ? "Key saved." : "Key removed."} The
+                backend is given the key when it starts, so this takes effect
+                after a restart.
+                <div>
+                  <button className="btn btn--primary" onClick={() => void relaunch()}>
+                    Restart now
+                  </button>
+                  <button className="btn" onClick={() => setKeyState("idle")}>
+                    Later
+                  </button>
+                </div>
+              </div>
+            )}
+          </>
+        ) : (
+          <p className="panel__hint">
+            Running in a browser. The key can only be stored from the desktop
+            app, which owns the Keychain.
+          </p>
+        )}
       </section>
     </div>
   );

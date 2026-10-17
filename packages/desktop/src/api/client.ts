@@ -11,6 +11,7 @@
 
 import type { AudioSource, JltEvent, SessionStats } from "../types/events";
 import { isJltEvent } from "../types/events";
+import { backendInfo } from "./tauri";
 
 export interface BackendInfo {
   port: number;
@@ -148,21 +149,15 @@ export class BackendClient {
 /**
  * Discover the backend.
  *
- * Under Tauri the Rust shell supplies the port and token. In a plain browser
- * (`npm run dev`) there is no shell, so the UI falls back to a mock stream
- * rather than pretending to be connected.
+ * Under the desktop shell the Rust side supplies the port and token. In a
+ * plain browser there is no shell, so `VITE_JLT_BACKEND` can point at a
+ * hand-started backend; failing that the UI falls back to a mock stream rather
+ * than pretending to be connected.
  */
 export async function resolveBackend(): Promise<BackendInfo | null> {
-  const tauri = (window as unknown as {
-    __TAURI__?: { core?: { invoke(cmd: string): Promise<BackendInfo> } };
-  }).__TAURI__;
-  if (tauri?.core?.invoke) {
-    try {
-      return await tauri.core.invoke("backend_info");
-    } catch {
-      return null;
-    }
-  }
+  const fromShell = await backendInfo();
+  if (fromShell) return fromShell;
+
   const override = import.meta.env.VITE_JLT_BACKEND as string | undefined;
   if (override) {
     const [port, token] = override.split(":");

@@ -238,3 +238,11 @@ body {
   .subtitles { scroll-behavior: auto; }
   .status__meter-fill { transition: none; }
 }
+
+.panel__row { display: flex; gap: 6px; margin-bottom: 10px; }
+.panel__section input[type="password"] {
+  display: block; width: 100%; margin-top: 4px; padding: 4px 6px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg); color: var(--fg); font-family: ui-monospace, monospace;
+}
+.panel__error { color: var(--danger); font-size: 11px; margin: 0 0 8px; }

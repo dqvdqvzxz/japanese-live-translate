@@ -96,6 +96,17 @@ fn set_always_on_top(window: tauri::Window, enabled: bool) -> Result<(), String>
     window.set_always_on_top(enabled).map_err(|e| e.to_string())
 }
 
+/// Restart the app.
+///
+/// The backend is handed the API key in its environment when it is spawned, so
+/// a key added afterwards only takes effect on the next launch. Restarting is
+/// clearer than appearing to accept a key that does nothing.
+#[tauri::command]
+fn relaunch(app: tauri::AppHandle) {
+    kill_backend(&app);
+    app.restart()
+}
+
 /// Spawn the backend and wait for its single handshake line.
 ///
 /// The backend prints exactly one JSON object to stdout and everything else to
@@ -230,6 +241,7 @@ fn main() {
             has_api_key,
             clear_api_key,
             set_always_on_top,
+            relaunch,
         ])
         .setup(|app| {
             match spawn_backend(app) {

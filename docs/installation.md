@@ -38,9 +38,14 @@ silence.
 
 ### 4. Add your API key
 
-Open **Settings** in the app and paste your key. It is stored in the **macOS
-Keychain** and nothing else: not in a file, not in the app's preferences, and
-never passed to the interface that renders the subtitles.
+Open **Settings** → **OpenAI API key**, paste your key, and press **Save to
+Keychain**. The app then offers to restart, which it needs to do: the backend
+is handed the key in its environment when it starts, so a key added afterwards
+only takes effect on the next launch.
+
+The key is stored in the **macOS Keychain** and nowhere else — not in a file,
+not in the app's preferences. The input is cleared as soon as it is saved and
+the key is never read back into the window.
 
 Capture cannot start until a key is present.
 
