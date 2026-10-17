@@ -19,6 +19,7 @@ import contextlib
 from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, WebSocket
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ValidationError
 from starlette.websockets import WebSocketDisconnect
@@ -72,6 +73,22 @@ def create_app(
 ) -> FastAPI:
     app = FastAPI(
         title="Japanese Live Translator", version=__version__, docs_url=None, redoc_url=None
+    )
+
+    # The renderer is always a different origin from the backend
+    # (tauri://localhost or the Vite dev server, versus http://127.0.0.1:<port>),
+    # so without CORS headers the browser blocks every request before it is
+    # sent — the Origin check below would never even see them.
+    #
+    # This is an explicit allowlist of the app's own origins, never a wildcard.
+    # Preflights are cached so the extra round trip is not paid per call.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=sorted(ALLOWED_ORIGINS),
+        allow_credentials=False,
+        allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type"],
+        max_age=600,
     )
 
     async def authorize(

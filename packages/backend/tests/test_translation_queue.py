@@ -67,7 +67,11 @@ async def test_submitting_publishes_created_then_translated():
 
 async def test_output_is_released_in_submission_order_despite_finishing_out_of_order():
     provider = FakeTranslationProvider(delays={"文1。": 0.25, "文2。": 0.10, "文3。": 0.01})
-    queue, recorder = build(provider)
+    # The stall release must not fire here, or this would be testing the
+    # opposite behaviour. It needs to exceed the head job's own delay, which
+    # the shared default (0.2 s) does not — that made this test race its own
+    # fixture. The stall path has its own test below.
+    queue, recorder = build(provider, reorder_stall_s=5.0)
     await queue.start()
     for seq in (1, 2, 3):
         queue.submit(segment(seq))

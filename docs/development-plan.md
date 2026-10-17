@@ -250,6 +250,7 @@ benchmarks, 60-minute run, packaging, docs.
 | 2026-10-17 | Phase 5 lint + types | `ruff`, `mypy --strict`, `eslint`, `tsc`, `cargo clippy -D warnings`, `cargo fmt --check` | All clean |
 | 2026-10-17 | Live backend process | `python -m jlt` + curl | ✅ handshake, auth, origin, loopback-only bind, no key leak |
 | 2026-10-17 | Live session on real Teams | `POST /api/session/start` then `/stop` | ✅ helper spawned, STT connected, `no_audio` warning correct, **0 orphans and 0 sockets after stop** |
+| 2026-10-17 | UI against the real backend | browser at `localhost:5173` + live backend | ✅ real sources listed, session started from the UI, helper spawned, STT connected, clean stop. Found and fixed: missing CORS headers, a stale placeholder, and the source selector not adopting a running session |
 | 2026-10-17 | Per-application Teams capture | helper, Teams test call, 5.7 s | ✅ **peak 25053, −23.7 dBFS** — the Electron-helper concern was unfounded |
 | 2026-10-17 | Full pipeline, real audio + live OpenAI | 78 s session | ✅ 6/6 translated, 0 failed, 0 orphans; stt p50 637 ms, translate p50 1250 ms, e2e p50 4120 ms / p95 4843 ms. Content invalid (captured unrelated system audio) |
 | 2026-10-17 | Audible capture (display filter) | helper + `afplay`, 6.08 s | ✅ **peak 7517, RMS −32.7 dBFS** — real audio, not a shaped silent stream |

@@ -51,8 +51,11 @@ as defence in depth even though the key should never reach a log call.
 - `Origin`, when present, must be `tauri://localhost` or `http://localhost:<dev-port>`.
   Any other origin is rejected, which blocks a malicious web page from driving
   the backend even if it somehow learned the token.
-- No CORS allowlist for arbitrary origins; the renderer is not a normal browser
-  origin.
+- CORS is enabled for exactly the origins above and nothing else. It is
+  required, not optional: the renderer is always a different origin from the
+  backend, so without `Access-Control-Allow-Origin` the browser refuses every
+  request before the `Origin` check can even run. `allow_credentials` is false
+  and the origin list is never a wildcard.
 
 Residual risk: any process running as the same user can read the token from the
 process environment or `/proc`-equivalent interfaces and reach the backend.

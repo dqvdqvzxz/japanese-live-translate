@@ -209,3 +209,52 @@ def test_websocket_delivers_session_events(client):
         seen = [socket.receive_json() for _ in range(2)]
         assert any(event["type"] == "session.started" for event in seen)
         client.post("/api/session/stop", headers=AUTH)
+
+
+# --- CORS -------------------------------------------------------------------
+#
+# The renderer is always a different origin from the backend, so missing CORS
+# headers block every request in the browser before the Origin check can run.
+
+
+def test_preflight_from_the_renderer_is_allowed(client):
+    response = client.options(
+        "/api/settings",
+        headers={
+            "Origin": "http://localhost:5173",
+            "Access-Control-Request-Method": "GET",
+            "Access-Control-Request-Headers": "authorization",
+        },
+    )
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "http://localhost:5173"
+
+
+def test_preflight_from_the_tauri_origin_is_allowed(client):
+    response = client.options(
+        "/api/settings",
+        headers={
+            "Origin": "tauri://localhost",
+            "Access-Control-Request-Method": "GET",
+            "Access-Control-Request-Headers": "authorization",
+        },
+    )
+    assert response.headers["access-control-allow-origin"] == "tauri://localhost"
+
+
+def test_a_real_request_carries_the_allow_origin_header(client):
+    response = client.get("/api/settings", headers={**AUTH, "Origin": "http://localhost:5173"})
+    assert response.headers["access-control-allow-origin"] == "http://localhost:5173"
+
+
+def test_a_foreign_origin_gets_no_cors_grant(client):
+    """No wildcard: a page the user visits must not be handed access."""
+    response = client.options(
+        "/api/settings",
+        headers={
+            "Origin": "https://evil.example",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+    assert response.headers.get("access-control-allow-origin") != "https://evil.example"
+    assert response.headers.get("access-control-allow-origin") != "*"

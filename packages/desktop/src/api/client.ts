@@ -68,6 +68,14 @@ export class BackendClient {
     return this.request("/api/settings", { method: "PATCH", body: JSON.stringify(patch) });
   }
 
+  getSession(): Promise<{
+    session_id: string | null;
+    state: string;
+    source: AudioSource | null;
+  }> {
+    return this.request("/api/session");
+  }
+
   start(sourceId: string): Promise<{ session_id: string }> {
     return this.request("/api/session/start", {
       method: "POST",

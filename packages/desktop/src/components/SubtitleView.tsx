@@ -6,6 +6,25 @@ interface Props {
   partial: LivePartial | null;
   fontSize: number;
   showPartials: boolean;
+  capture: string;
+}
+
+/** Telling a user to "press Start" while already capturing is just confusing. */
+function placeholderFor(capture: string): string {
+  switch (capture) {
+    case "running":
+      return "Listening. Japanese will appear here as soon as someone speaks.";
+    case "paused":
+      return "Paused. Press Resume to continue.";
+    case "starting":
+      return "Starting…";
+    case "error":
+      return "Capture stopped. See the message above.";
+    case "stopped":
+      return "Session ended.";
+    default:
+      return "Choose the application playing the meeting audio, then press Start.";
+  }
 }
 
 const FAILURE_TEXT: Record<string, string> = {
@@ -26,7 +45,7 @@ const FAILURE_TEXT: Record<string, string> = {
  * the bottom: yanking the view away from someone reading back is worse than
  * making them scroll down again.
  */
-export function SubtitleView({ lines, partial, fontSize, showPartials }: Props) {
+export function SubtitleView({ lines, partial, fontSize, showPartials, capture }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const pinnedToBottom = useRef(true);
 
@@ -55,11 +74,7 @@ export function SubtitleView({ lines, partial, fontSize, showPartials }: Props) 
       aria-live="polite"
       aria-label="Subtitles"
     >
-      {empty && (
-        <p className="placeholder">
-          Choose the application playing the meeting audio, then press Start.
-        </p>
-      )}
+      {empty && <p className="placeholder">{placeholderFor(capture)}</p>}
 
       {lines.map((line) => (
         <article key={line.key} className={`line line--${line.state}`}>

@@ -59,14 +59,39 @@ export default function App() {
       setClient(backend);
 
       try {
-        const [loaded, discovered] = await Promise.all([
+        const [loaded, discovered, current] = await Promise.all([
           backend.getSettings(),
           backend.listSources(),
+          backend.getSession(),
         ]);
         if (cancelled) return;
         setSettings(loaded);
         setSources(discovered.sources);
-        setSelected(discovered.sources.find((s) => s.is_recommended)?.id ?? discovered.sources[0]?.id ?? "");
+
+        // If a session is already running — the page was reloaded, or the
+        // window reopened — adopt the source the backend is actually
+        // capturing. Showing a different application than the one being sent
+        // to OpenAI would break the guarantee in docs/security.md §7.
+        const running = current.source?.id;
+        setSelected(
+          running ??
+            discovered.sources.find((s) => s.is_recommended)?.id ??
+            discovered.sources[0]?.id ??
+            "",
+        );
+        if (current.session_id) {
+          dispatch({
+            type: "status",
+            ts: Date.now() / 1000,
+            session_id: current.session_id,
+            capture: current.state as never,
+            stt: "connected",
+            translation: "ready",
+            audio_level_dbfs: null,
+            queue_depth: 0,
+            detail: null,
+          });
+        }
       } catch (error) {
         if (!cancelled) setActionError(String(error));
       }
@@ -136,9 +161,10 @@ export default function App() {
         partial={state.partial}
         fontSize={fontSize}
         showPartials={showPartials}
+        capture={state.capture}
       />
     ),
-    [state.lines, state.partial, fontSize, showPartials],
+    [state.lines, state.partial, fontSize, showPartials, state.capture],
   );
 
   return (
