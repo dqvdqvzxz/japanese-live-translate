@@ -97,7 +97,8 @@ from the API.** The docs state completion ordering is not guaranteed, so
 | `EventDispatcher` | In-process pub/sub, fan-out to subscribers, backpressure per subscriber | Business logic |
 | `WebSocketGateway` | FastAPI WS endpoint, auth, serialization, per-client send queue | Business logic |
 | `SettingsManager` | Load/validate/persist non-secret settings; Keychain for the key | Hold plaintext keys on disk |
-| `HistoryManager` | In-memory ring buffer of segments; optional SQLite only on explicit opt-in | Persist by default |
+| `HistoryManager` | In-memory ring of segments; on opt-in, SQLite for the session list plus one Markdown file per meeting in the user's chosen folder | Persist by default, or choose the folder itself |
+| `SummaryProvider` | Post-meeting recap and action items over the translated transcript | Run automatically |
 
 ## 4. Key design decisions
 
@@ -140,6 +141,25 @@ marked target text is to be translated. Context pairs are never re-emitted.
 Rust reads it from Keychain and passes it to the Python child via an
 environment variable on spawn (not argv, which is world-readable via `ps`).
 The renderer receives only a boolean `api_key_present`.
+
+### D-9 The desktop shell needs explicit capabilities
+
+Tauri denies *core* commands unless a capability grants them, while custom
+commands registered in `invoke_handler` need no grant. That asymmetry hid a
+real bug for a long time: everything hand-written worked, so the bridge looked
+healthy, while `data-tauri-drag-region` silently did nothing because
+`core:window:allow-start-dragging` was never granted. `capabilities/default.json`
+exists for that reason and should be checked first whenever a built-in Tauri
+behaviour appears to do nothing.
+
+### D-10 Ad-hoc signing constrains entitlements
+
+A shareable build is ad-hoc signed. `keychain-access-groups` cannot be
+satisfied by an ad-hoc signature — the `$(AppIdentifierPrefix)` placeholder
+has nothing to resolve against — and macOS SIGKILLs the app at launch if it is
+present. The entitlement was removed rather than worked around: it is only
+needed to *share* a keychain item between apps, and this app reads its own
+item from the default keychain, which needs no entitlement.
 
 ### D-8 Degrade, don't crash
 Any single component failure maps to a typed `error` event with a severity.

@@ -38,3 +38,6 @@ packages/backend/dist/
 
 # Tauri generated ACL schemas
 packages/desktop/src-tauri/gen/
+
+# Release artifacts
+dist/

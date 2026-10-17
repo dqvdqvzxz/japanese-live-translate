@@ -3,7 +3,7 @@ BACKEND := packages/backend
 CAPTURE := packages/audio-capture
 DESKTOP := packages/desktop
 
-.PHONY: help setup test lint backend dev bundle capture-build freeze-backend capture-selftest stability verify-openai smoke-stt eval-translation clean doctor
+.PHONY: help setup test lint backend dev bundle capture-build freeze-backend release capture-selftest stability verify-openai smoke-stt eval-translation clean doctor
 
 help:
 	@grep -E '^[a-z-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-18s %s\n", $$1, $$2}'
@@ -46,6 +46,9 @@ freeze-backend: ## Freeze the backend into a standalone executable
 
 bundle: capture-build freeze-backend ## Build a macOS .app and .dmg (self-contained)
 	cd $(DESKTOP) && npm run tauri build
+
+release: bundle ## Build, sign ad-hoc and package a shareable .dmg into dist/
+	./scripts/package_release.sh
 
 stability: ## Long-running stability check (make stability MINUTES=60)
 	./scripts/stability_run.sh $(MINUTES)

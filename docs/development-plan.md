@@ -3,7 +3,7 @@
 Status legend: ✅ done & verified · 🟡 implemented, verification pending ·
 ⬜ not started · ⛔ blocked
 
-Last updated: 2026-10-16 (toolchain installed; Phase 0 accepted)
+Last updated: 2026-10-17 (Phases 0–6 implemented; shareable release built)
 
 ## Environment status
 
@@ -231,6 +231,7 @@ stream.
 | Actionable Screen Recording permission dialog | ✅ opens the exact System Settings pane |
 | Info section: attribution and data handling (Japanese) | ✅ |
 | Code signing and notarization | ⛔ needs an Apple Developer ID |
+| Shareable release artifact | ✅ `make release` → ad-hoc signed `.dmg` |
 
 **Acceptance: PARTIALLY MET.** Everything that can be verified on this machine
 without another person in a meeting is verified.
@@ -305,6 +306,10 @@ instead; the Makefile's relative `--env-file ../../.env` is unaffected.
 | 2026-10-17 | Reconnect over a real socket | `pytest tests/test_reconnect_integration.py` | ✅ 6 passed — connect, configure, drop, reconnect, reconfigure, audio resumes, silent-server timeout |
 | 2026-10-17 | macOS packaging | `make bundle` | ✅ `.app` 24.3 MB, `.dmg` 20.6 MB, self-contained; runs with `PATH=/usr/bin:/bin` |
 | 2026-10-17 | Orphan processes on exit | normal quit, SIGKILL, supervisor death | ✅ 0 orphans on all three **after** fixing a real orphaned-backend bug |
+| 2026-10-17 | Shareable release | `make release` | ✅ `dist/Japanese Live Translator 0.1.0.dmg`, 21 MB; mounted and verified as a recipient would: deep signature valid, backend and capture helper present |
+| 2026-10-17 | Ad-hoc signed app launches | ran the signed bundle | ✅ **after** removing `keychain-access-groups`, which an ad-hoc signature cannot satisfy — macOS SIGKILLed (exit 137) every build that carried it |
+| 2026-10-17 | Keychain still reachable without that entitlement | dummy item + app launch | ✅ backend received the key; dummy removed afterwards |
+| 2026-10-17 | Window drag capability | inspected `gen/schemas/capabilities.json` | ✅ `core:window:allow-start-dragging` granted — absent before, which is why dragging silently did nothing |
 | 2026-10-17 | UI against the real backend | browser at `localhost:5173` + live backend | ✅ real sources listed, session started from the UI, helper spawned, STT connected, clean stop. Found and fixed: missing CORS headers, a stale placeholder, and the source selector not adopting a running session |
 | 2026-10-17 | Per-application Teams capture | helper, Teams test call, 5.7 s | ✅ **peak 25053, −23.7 dBFS** — the Electron-helper concern was unfounded |
 | 2026-10-17 | Full pipeline, real audio + live OpenAI | 78 s session | ✅ 6/6 translated, 0 failed, 0 orphans; stt p50 637 ms, translate p50 1250 ms, e2e p50 4120 ms / p95 4843 ms. Content invalid (captured unrelated system audio) |
@@ -317,6 +322,11 @@ advance.
 
 ## Open issues
 
+0. **Window dragging has not been confirmed by hand.** The missing capability
+   is fixed and the ACL now grants `start-dragging`, but dragging a native
+   window cannot be automated from here — it needs a human to try it. Two
+   earlier attempts at this bug looked right and were not, so this stays open
+   until someone drags the window.
 1. **No clean Japanese end-to-end run yet.** The pipeline has been measured on
    real audio (see `docs/benchmarks.md`), but that run captured unrelated
    system audio rather than Japanese. A valid content test needs Japanese

@@ -85,12 +85,28 @@ Teams meetings, on a low-resource Mac.
 - FR-5.3 Vietnamese appears directly beneath its Japanese source.
 - FR-5.4 Start / Stop / Pause / Resume controls.
 - FR-5.5 Always-on-top toggle.
-- FR-5.6 Session history view (in-memory by default).
+- FR-5.6 Session history as a sidebar that widens the layout rather than
+  covering the live subtitles. Sessions grouped by day, newest first, each
+  showing its name and estimated cost. Selecting one renders it in the main
+  content area.
+- FR-5.6a On Stop, offer to name the recording; skipping keeps a dated
+  default, and the name can be changed later.
+- FR-5.6b Per-session AI summary with action items, generated only on request.
 - FR-5.7 Settings: audio source, STT delay, glossary, font size, theme,
   context size, persistence opt-in.
 - FR-5.8 Visible connection and capture status at all times.
 - FR-5.9 Dark mode, following the system by default.
 - FR-5.10 Configurable subtitle font size.
+
+### FR-5c Storage
+
+- FR-5c.1 Transcript persistence is off by default.
+- FR-5c.2 When enabled, the user picks the destination folder through the
+  macOS system picker; the app never chooses it.
+- FR-5c.3 Each finished meeting is written there as one Markdown file named
+  after the recording; renaming the recording renames the file and removes the
+  stale one.
+- FR-5c.4 Nothing is written anywhere until a folder is chosen.
 
 ### FR-6 Security
 See `docs/security.md`. Summary: API key only in macOS Keychain, never sent to

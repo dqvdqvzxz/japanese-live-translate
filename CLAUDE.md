@@ -25,6 +25,7 @@ make dev            # backend + vite + tauri dev
 make verify-openai  # live API probe (needs OPENAI_API_KEY)
 make capture-build  # build the Swift helper
 make capture-selftest  # 10 s capture → WAV, for ear-checking
+make release        # ad-hoc signed, shareable .dmg in dist/
 ```
 
 ## Non-negotiable constraints
@@ -50,6 +51,13 @@ the security model. Breaking them breaks the product.
 9. **Capture never starts without an explicit user action.**
 10. **Never fabricate a benchmark, a test result, or an API behaviour.** If it
     was not executed, mark it pending.
+11. **Tauri denies core commands without a capability.** Custom commands in
+    `invoke_handler` need none, which masks the gap — if a built-in Tauri
+    behaviour silently does nothing, check `src-tauri/capabilities/` first.
+    That is why window dragging appeared broken for three attempts.
+12. **Do not add `keychain-access-groups`.** An ad-hoc signature cannot
+    satisfy it and macOS SIGKILLs the app at launch. The default keychain
+    needs no entitlement.
 
 ## Conventions
 
@@ -74,3 +82,7 @@ the security model. Breaking them breaks the product.
 | Merge/dedupe rules | `packages/backend/src/jlt/segments/manager.py` |
 | Translation prompt | `packages/backend/src/jlt/translation/provider.py` |
 | Golden dataset | `packages/backend/tests/data/golden_ja_vi.json` |
+| Session history and files | `packages/backend/src/jlt/history.py` |
+| Summary prompt | `packages/backend/src/jlt/translation/summary.py` |
+| Native commands | `packages/desktop/src-tauri/src/main.rs` |
+| Tauri permissions | `packages/desktop/src-tauri/capabilities/default.json` |

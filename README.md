@@ -11,8 +11,10 @@ Teams audio ──ScreenCaptureKit──► 24 kHz mono PCM16
 
 ## Status
 
-**Phases 0–5 are implemented.** Phase 6 (real-meeting testing, benchmarks,
-packaging) remains. Nothing here claims a verification that was not actually
+**Phases 0–6 are implemented**, including a shareable macOS build
+(`make release`). See [docs/sharing.md](docs/sharing.md) for installing a
+copy, and the verification log in `docs/development-plan.md` for what has
+actually been tested. Nothing here claims a verification that was not actually
 performed — see the verification log in `docs/development-plan.md`.
 
 Known gaps, stated plainly:
@@ -20,8 +22,9 @@ Known gaps, stated plainly:
 - The audio tap has not been shown to carry an **audible** signal. It produces
   a byte-exact 24 kHz stream, but every test capture so far was silent because
   Teams was not playing anything.
-- The Tauri shell compiles but has **not been run**; the Keychain path is
-  unexercised.
+- **Window dragging is fixed but unconfirmed by hand.** The capability it
+  needed is now granted and verified in the generated ACL, but dragging a
+  native window cannot be tested from here.
 - No end-to-end benchmark exists. Component measurements are in
   `docs/benchmarks.md` and are labelled as such.
 

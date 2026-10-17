@@ -167,8 +167,19 @@ make backend  # the backend alone, printing its port and token
 ### Package
 
 ```bash
-make bundle
+make bundle    # the .app and Tauri's own .dmg
+make release   # ad-hoc signs everything and builds a shareable .dmg in dist/
 ```
+
+`make release` is the one to use for giving the app to somebody else: it signs
+the whole tree including the backend and capture helper in `Resources/`
+(without that the nested signatures disagree and another Mac calls the app
+damaged), and ships `docs/sharing.md` inside the image as "READ ME FIRST".
+
+Note the entitlements deliberately omit `keychain-access-groups`. An ad-hoc
+signature cannot satisfy it, and macOS SIGKILLs the app at launch when it is
+present. It is only needed to share a keychain item between applications,
+which this app does not do.
 
 Produces `packages/desktop/src-tauri/target/release/bundle/`:
 
