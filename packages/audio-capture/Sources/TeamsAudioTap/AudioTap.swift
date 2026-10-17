@@ -198,14 +198,32 @@ final class AudioTap: NSObject, SCStreamOutput, SCStreamDelegate {
         let thread = Thread { [weak self] in
             guard let self else { return }
             let handle = FileHandle.standardOutput
+            let frameInterval = Double(self.frameMS) / 1000.0
+            var nextDeadline = Date().timeIntervalSinceReferenceDate
+
             while !Thread.current.isCancelled && !self.stopping.value {
-                let chunk = self.nextChunk()
-                if chunk.isEmpty {
-                    usleep(useconds_t(self.frameMS * 500)) // half a frame
-                    continue
-                }
+                // Paced by the wall clock, one frame per frame interval.
+                //
+                // Reading "whatever is available" from each ring and writing
+                // it meant that whenever only one ring happened to be full the
+                // streams were emitted one after the other rather than summed
+                // — producing roughly 2.7x realtime audio, which no
+                // transcriber can make sense of. A fixed cadence makes the
+                // output exactly realtime regardless of which source is
+                // currently delivering.
+                nextDeadline += frameInterval
+                let chunk = self.mixedFrame()
                 handle.write(Data(chunk))
-                self.framesWritten += chunk.count / self.frameBytes
+                self.framesWritten += 1
+
+                let sleepFor = nextDeadline - Date().timeIntervalSinceReferenceDate
+                if sleepFor > 0 {
+                    usleep(useconds_t(sleepFor * 1_000_000))
+                } else {
+                    // Fell behind — give up the lost time rather than
+                    // sprinting to catch up and emitting faster than realtime.
+                    nextDeadline = Date().timeIntervalSinceReferenceDate
+                }
             }
         }
         thread.name = "jlt.audiotap.drain"
@@ -214,52 +232,40 @@ final class AudioTap: NSObject, SCStreamOutput, SCStreamDelegate {
         drainThread = thread
     }
 
-    /// One chunk of output, mixing the application and microphone rings.
+    /// Exactly one frame of output, summing whatever each ring has.
     ///
-    /// The two streams run on independent clocks, so they are never perfectly
-    /// aligned. Rather than try to synchronise them, each is buffered on its
-    /// own and whatever is available is summed; a stream that is quiet or
-    /// absent simply contributes nothing. Drift stays bounded by the rings'
-    /// drop-oldest policy, which matters over a long meeting.
+    /// A ring that is empty or short contributes silence, so a source that is
+    /// quiet — or absent entirely — simply does not add anything, and the
+    /// stream keeps running at realtime either way. That also keeps frames
+    /// flowing when the captured application is silent, which previously
+    /// stalled the whole pipeline with no indication.
     ///
     /// Sums are clamped rather than allowed to wrap: a wrapped overflow turns
-    /// a loud moment into white noise, which is far worse for transcription
-    /// than a clipped peak.
-    private func nextChunk() -> [UInt8] {
-        let limit = frameBytes * 8
-        let appChunk = ring.read(max: limit)
+    /// a loud moment into white noise, far worse for transcription than a
+    /// clipped peak.
+    private func mixedFrame() -> [UInt8] {
+        let size = frameBytes
+        var app = ring.read(max: size)
+        if app.count < size { app += [UInt8](repeating: 0, count: size - app.count) }
+
         guard includeMicrophone else {
-            meter(appChunk)
-            return appChunk
+            meter(app)
+            return app
         }
 
-        let micChunk = micRing.read(max: limit)
-        if micChunk.isEmpty {
-            meter(appChunk)
-            return appChunk
-        }
-        if appChunk.isEmpty {
-            meter(micChunk)
-            return micChunk
-        }
+        var mic = micRing.read(max: size)
+        if mic.count < size { mic += [UInt8](repeating: 0, count: size - mic.count) }
 
-        let pairs = min(appChunk.count, micChunk.count) / 2
-        var mixed = [UInt8](repeating: 0, count: max(appChunk.count, micChunk.count))
-
-        appChunk.withUnsafeBytes { a in
-            micChunk.withUnsafeBytes { m in
+        var mixed = [UInt8](repeating: 0, count: size)
+        app.withUnsafeBytes { a in
+            mic.withUnsafeBytes { m in
                 mixed.withUnsafeMutableBytes { out in
                     let aS = a.bindMemory(to: Int16.self)
                     let mS = m.bindMemory(to: Int16.self)
                     let oS = out.bindMemory(to: Int16.self)
-                    for i in 0..<pairs {
+                    for i in 0..<oS.count {
                         let sum = Int32(aS[i]) + Int32(mS[i])
                         oS[i] = Int16(max(-32768, min(32767, sum)))
-                    }
-                    // Whichever stream was longer contributes its tail alone.
-                    let longer = appChunk.count >= micChunk.count ? aS : mS
-                    if pairs < oS.count {
-                        for i in pairs..<oS.count { oS[i] = longer[i] }
                     }
                 }
             }
@@ -277,13 +283,12 @@ final class AudioTap: NSObject, SCStreamOutput, SCStreamDelegate {
         }
     }
 
+    /// Emit whatever is still buffered when stopping, without the pacing.
     private func flushRemaining() {
         let handle = FileHandle.standardOutput
-        while true {
-            let chunk = nextChunk()
-            if chunk.isEmpty { break }
-            handle.write(Data(chunk))
-            framesWritten += chunk.count / frameBytes
+        while ring.count > 0 || micRing.count > 0 {
+            handle.write(Data(mixedFrame()))
+            framesWritten += 1
         }
     }
 
