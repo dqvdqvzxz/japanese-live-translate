@@ -17,7 +17,7 @@ doctor: ## Report which required toolchains are present
 
 setup: ## Install dependencies for every package
 	cd $(BACKEND) && uv sync --extra dev
-	cd $(DESKTOP) && npm install
+	cd $(DESKTOP) && npm ci
 	$(MAKE) capture-build
 
 capture-build: ## Build the Swift audio helper

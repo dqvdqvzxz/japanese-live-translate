@@ -86,6 +86,24 @@ make backend # just the backend; prints its port and token on stdout
 `curl`; it binds `127.0.0.1` on an OS-assigned port and prints a single JSON
 handshake line.
 
+## Building a copy to share
+
+```bash
+make release   # → dist/Japanese Live Translator <version>.dmg
+make bundle    # just the .app, without the signing step or the .dmg
+```
+
+`make release` builds the Swift helper, freezes the backend with PyInstaller,
+builds the Tauri app, signs it ad-hoc and packs a `.dmg`. The first run
+compiles the Rust side from scratch and takes a while. It empties `dist/` each
+time.
+
+The build is **Apple Silicon only** and **not notarized** (no Developer ID), so
+whoever receives it must clear the quarantine flag before macOS will open it,
+and needs their own OpenAI API key and Screen Recording permission. The steps
+for the recipient are in [docs/sharing.md](docs/sharing.md), which is also
+bundled into the `.dmg` as `READ ME FIRST.md`.
+
 ## Verifying audio capture
 
 This is the highest-risk part of the system and the one that cannot be
