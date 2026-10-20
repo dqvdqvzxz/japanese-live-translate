@@ -376,6 +376,45 @@ async def test_the_heartbeat_reports_counters_and_no_content(tmp_path, caplog):
     await session.stop()
 
 
+async def test_the_heartbeat_says_what_actually_arrived_from_each_source(tmp_path, caplog):
+    """`frames_in` ticks on the helper's own clock even when nothing is captured,
+    so the heartbeat must also carry the helper's per-input arrival counters."""
+    import logging
+
+    session, _, capture, _ = build(tmp_path)
+    await session.start("app:x")
+    capture.stats = {
+        "app": {"buffers": 0, "peak_dbfs": -120.0},
+        "mic": {"buffers": 311, "peak_dbfs": -41.2},
+    }
+
+    with caplog.at_level(logging.INFO, logger="jlt.session"):
+        session._log_heartbeat()
+
+    record = next(r for r in caplog.records if r.getMessage() == "pipeline")
+    assert record.source_stats == capture.stats  # type: ignore[attr-defined]
+    await session.stop()
+
+
+async def test_the_output_device_is_logged_when_capture_starts(tmp_path, caplog):
+    """Silence on speakers and silence on a headset have different causes, so
+    the log has to say which one this was."""
+    import logging
+
+    from jlt.models import OutputDevice
+
+    session, _, capture, _ = build(tmp_path)
+    capture.output = OutputDevice(
+        name="AirPods", transport="bluetooth", data_source=None, kind="headphones"
+    )
+    with caplog.at_level(logging.INFO, logger="jlt.session"):
+        await session.start("app:x")
+    record = next(r for r in caplog.records if r.getMessage() == "audio output")
+    assert record.output_kind == "headphones"  # type: ignore[attr-defined]
+    assert record.output_transport == "bluetooth"  # type: ignore[attr-defined]
+    await session.stop()
+
+
 async def test_the_microphone_is_off_unless_the_user_turns_it_on(tmp_path):
     """Recording the room is a different consent question from capturing an
     application the user is already listening to."""

@@ -7,6 +7,8 @@ interface Props {
   settings: Settings | null;
   onPatch: (patch: Record<string, unknown>) => void;
   onClose: () => void;
+  /** Deleting while a session is being recorded would delete that session too. */
+  capturing: boolean;
   onClearHistory: () => void;
 }
 
@@ -19,8 +21,9 @@ const DELAYS = ["minimal", "low", "medium", "high", "xhigh"] as const;
  * renderer only ever learns whether one is present. Entering it is a Tauri
  * command handled on the Rust side (docs/security.md §2).
  */
-export function SettingsPanel({ settings, onPatch, onClose, onClearHistory }: Props) {
+export function SettingsPanel({ settings, onPatch, onClose, capturing, onClearHistory }: Props) {
   const [confirmPersist, setConfirmPersist] = useState(false);
+  const [confirmClear, setConfirmClear] = useState(false);
   const [keyInput, setKeyInput] = useState("");
   const [keyState, setKeyState] = useState<"idle" | "saving" | "saved" | "removed">("idle");
   const [keyError, setKeyError] = useState<string | null>(null);
@@ -84,6 +87,23 @@ export function SettingsPanel({ settings, onPatch, onClose, onClearHistory }: Pr
           />
           Show Japanese as it is being spoken
         </label>
+      </section>
+
+      <section className="panel__section">
+        <h3>Audio</h3>
+        <label className="panel__check">
+          <input
+            type="checkbox"
+            checked={settings.audio.include_microphone}
+            onChange={(e) => onPatch({ audio: { include_microphone: e.target.checked } })}
+          />
+          Thu thêm microphone
+        </label>
+        <p className="panel__hint">
+          Âm thanh của ứng dụng luôn được thu. Bật mục này chỉ khi cần nghe cả người nói
+          trong phòng (họp trực tiếp, loa ngoài). Nếu đang dùng loa ngoài, micro có thể thu
+          lại tiếng từ loa nên một câu có thể bị dịch hai lần. Áp dụng từ lần Start tiếp theo.
+        </p>
       </section>
 
       <section className="panel__section">
@@ -195,9 +215,33 @@ export function SettingsPanel({ settings, onPatch, onClose, onClearHistory }: Pr
             </div>
           </div>
         )}
-        <button className="btn" onClick={onClearHistory}>
-          Delete all history
-        </button>
+        {confirmClear ? (
+          <div className="panel__confirm">
+            Xóa toàn bộ lịch sử trong app? Các bản ghi và bản tóm tắt sẽ mất. Các tệp
+            transcript đã lưu trong thư mục của bạn không bị xóa.
+            <div>
+              <button
+                className="btn btn--danger"
+                onClick={() => {
+                  setConfirmClear(false);
+                  onClearHistory();
+                }}
+              >
+                Xóa
+              </button>
+              <button className="btn" onClick={() => setConfirmClear(false)}>
+                Hủy
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button className="btn" onClick={() => setConfirmClear(true)} disabled={capturing}>
+            Delete all history
+          </button>
+        )}
+        {capturing && (
+          <p className="panel__hint">Dừng phiên đang chạy trước khi xóa lịch sử.</p>
+        )}
       </section>
 
       <section className="panel__section">

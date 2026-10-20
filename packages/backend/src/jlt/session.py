@@ -35,6 +35,7 @@ from .models import (
     AudioSource,
     CaptureState,
     ErrorEvent,
+    OutputDevice,
     Segment,
     SessionRecord,
     SessionStartedEvent,
@@ -140,6 +141,10 @@ class SessionManager:
         """
         return await self._capture_factory().list_sources()
 
+    async def output_device(self) -> OutputDevice:
+        """Headphones or speakers right now. Stateless, like `list_sources`."""
+        return await self._capture_factory().output_device()
+
     # -- lifecycle ----------------------------------------------------------
 
     async def start(self, source_id: str) -> str:
@@ -185,6 +190,18 @@ class SessionManager:
             capture.on_warning = self._on_capture_warning
         self.source = await capture.start(
             source_id, include_microphone=settings.audio.include_microphone
+        )
+
+        # Recorded because a capture that comes back silent is read differently
+        # on speakers than on a headset; the device name is not meeting content.
+        device = await capture.output_device()
+        log.info(
+            "audio output",
+            extra={
+                "output_kind": device.kind,
+                "output_transport": device.transport,
+                "output_device": device.name,
+            },
         )
 
         stt = self._stt_factory(settings)
@@ -370,6 +387,11 @@ class SessionManager:
         arriving, whether the VAD is closing turns, whether the model is
         answering, and whether translation is running. No meeting content is
         included — counts, levels and states only.
+
+        `frames_in` counts what the helper wrote, and the helper writes on a
+        fixed clock whether or not anything was captured, so on its own it only
+        proves the helper is alive. `source_stats` is what says whether audio
+        actually arrived from the application and the microphone.
         """
         stream, stt = self._stream, self._stt
         transcripts, queue = self._transcripts, self._translations
@@ -379,6 +401,7 @@ class SessionManager:
                 "capture": self._capture_state,
                 "stt": self._stt_state,
                 "frames_in": stream.frames_in if stream else 0,
+                "source_stats": getattr(self._capture, "stats", None),
                 "level_dbfs": round(stream.level_dbfs, 1) if stream else None,
                 "speech_audio_s": round(stream.audio_seconds_sent, 1) if stream else 0.0,
                 "commits": stream.seq if stream else 0,

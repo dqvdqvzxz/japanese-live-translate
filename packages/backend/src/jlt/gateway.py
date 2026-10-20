@@ -17,7 +17,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
@@ -28,6 +28,7 @@ from starlette.websockets import WebSocketDisconnect
 from . import __version__
 from .audio.capture_service import CaptureError, PermissionDenied
 from .events import EventDispatcher
+from .interfaces import LogSource
 from .logging import get_logger
 from .models import GlossaryEntry
 from .secrets import Secret, token_matches
@@ -86,6 +87,7 @@ def create_app(
     session: SessionManager,
     dispatcher: EventDispatcher,
     started_at: float,
+    log_buffer: LogSource | None = None,
 ) -> FastAPI:
     app = FastAPI(
         title="Japanese Live Translator", version=__version__, docs_url=None, redoc_url=None
@@ -177,6 +179,35 @@ def create_app(
         except CaptureError as exc:
             raise api_error(503, exc.code, str(exc)) from exc
         return {"sources": [source.model_dump() for source in sources]}
+
+    @app.get("/api/audio/output", dependencies=guard)
+    async def output_device() -> dict[str, Any]:
+        """Headphones or speakers, for the indicator beside the source picker.
+
+        Always 200: when the device cannot be read the answer is
+        `{"kind": "unknown"}`, which is information, not a failure.
+        """
+        return (await session.output_device()).model_dump()
+
+    # -- logs ---------------------------------------------------------------
+
+    @app.get("/api/logs", dependencies=guard)
+    async def logs(
+        level: Literal["warning", "info"] = "warning",
+        limit: int = Query(default=200, ge=1, le=1000),
+    ) -> dict[str, Any]:
+        """Recent backend log records, oldest first, for the UI's log view.
+
+        Already redacted, and counts-and-codes only by the same rule as the log
+        file itself (docs/security.md §5). `file` is where the full log lives.
+        """
+        if log_buffer is None:
+            return {"entries": [], "file": None}
+        path = log_buffer.path
+        return {
+            "entries": log_buffer.records(min_level=level, limit=limit),
+            "file": str(path) if path else None,
+        }
 
     # -- session ------------------------------------------------------------
 
@@ -284,6 +315,14 @@ def create_app(
 
     @app.delete("/api/history", dependencies=guard)
     async def clear_history() -> dict[str, str]:
+        # Clearing deletes the session row too, so doing it mid-meeting would
+        # make the meeting being recorded vanish from history when it stops.
+        if session.active:
+            raise api_error(
+                409,
+                "session_active",
+                "Stop the current session before deleting history.",
+            )
         session.history.clear()
         return {"status": "cleared"}
 

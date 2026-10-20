@@ -25,6 +25,8 @@ backend process and handed to the renderer by the Rust shell. See
 | `GET` | `/api/settings` | — | `Settings` |
 | `PATCH` | `/api/settings` | partial `Settings` | `Settings` |
 | `GET` | `/api/audio/sources` | — | `{"sources":[AudioSource]}` |
+| `GET` | `/api/audio/output` | — | `{"name","transport","data_source","kind"}` — `kind` is `headphones`, `speakers`, `other` or `unknown`; always 200 |
+| `GET` | `/api/logs?level=warning\|info&limit=300` | — | `{"entries":[LogRecord],"file":"<path>"\|null}` — oldest first, redacted |
 | `POST` | `/api/session/start` | `{"source_id": "...", "mode":"application"}` | `{"session_id": "..."}` |
 | `POST` | `/api/session/pause` | — | `{"state":"paused"}` |
 | `POST` | `/api/session/resume` | — | `{"state":"running"}` |
@@ -249,16 +251,48 @@ teams-audio-tap --capture <source_id> --rate 24000 --channels 1 --frame-ms 20
 With `--list-sources`, stdout carries a single JSON object
 `{"sources":[AudioSource,...]}` and the process exits.
 
+With `--output-device`, stdout carries a single JSON object
+`{"name":"MacBook Pro Speakers","transport":"built-in","data_source":"ispk","kind":"speakers"}`
+and the process exits. It needs no permission. `kind` is `headphones` when the
+built-in jack is in use (`data_source` `hdpn`) or the output is Bluetooth or
+USB, `speakers` for the built-in speakers or an HDMI/DisplayPort/AirPlay
+output, otherwise `other`; with no output device the object is
+`{"kind":"unknown"}`. It is informational: application audio is tapped before
+it reaches the output device, so capture does not depend on it.
+
 Control messages (stderr):
 
 ```jsonc
 {"type":"ready","rate":24000,"channels":1,"frame_bytes":960}
 {"type":"started","source_id":"app:com.microsoft.teams2","name":"Microsoft Teams"}
 {"type":"level","rms_dbfs":-28.4}            // ~4 Hz, for the UI meter
+{"type":"stats","app":{...},"mic":{...}}     // every 5 s; `mic` only when the microphone is in the stream
 {"type":"warning","code":"no_audio","message":"No audio for 10s"}
 {"type":"error","code":"permission_denied","message":"Screen Recording permission required"}
 {"type":"stopped","frames":180000,"dropped":0}
 ```
+
+`stats` says what actually *arrived* from each input, which `level` cannot:
+the helper writes on a fixed 20 ms clock whether or not anything was captured,
+so a level of −120 dBFS alone is the same for "nothing arrived", "arrived but
+could not be converted" and "arrived as all zeros". Each of `app` / `mic` is
+
+```jsonc
+{"buffers":412,            // sample buffers received from ScreenCaptureKit
+ "input_frames":395520,    // frames in those buffers, at the source rate
+ "output_frames":197760,   // frames that survived conversion to 24 kHz mono
+ "peak_dbfs":-23.7,        // loudest converted sample so far; -120 = all zeros
+ "rejected":{"format":0,"buffer_list":0,"convert":0},
+ "format":{"rate":48000,"channels":1,"bits":32,"non_interleaved":true},  // last buffer seen
+ "last_error_code":-50}    // only when a conversion reported one
+```
+
+Reading it: `buffers == 0` → the stream never fed that input;
+`buffers > 0, output_frames == 0` → a format we mishandle (see `rejected` and
+`format`); `output_frames > 0, peak_dbfs == -120` → the OS delivered silence.
+After 8 s the helper turns each of those into a one-shot `warning` with code
+`no_{app,mic}_buffers`, `{app,mic}_convert_failed` or `{app,mic}_all_zero`.
+Counts, formats and levels only — never samples.
 
 Graceful stop: Python sends `SIGINT`; the helper stops the stream, flushes,
 emits `stopped`, and exits 0. Python waits up to 3 s, then `SIGKILL`.

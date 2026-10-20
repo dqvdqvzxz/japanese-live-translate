@@ -195,6 +195,14 @@ class FakeCapture:
         self.start_calls = 0
         self.include_microphone = False
         self.on_warning = None
+        #: What the real service exposes as `stats` — the helper's per-input
+        #: arrival counters. None until the helper has reported.
+        self.stats: dict | None = None
+        from jlt.models import OutputDevice
+
+        self.output = OutputDevice(
+            name="MacBook Pro Speakers", transport="built-in", data_source="ispk", kind="speakers"
+        )
         self._release = asyncio.Event()
 
     async def list_sources(self):
@@ -208,6 +216,9 @@ class FakeCapture:
                 is_recommended=True,
             )
         ]
+
+    async def output_device(self):
+        return self.output
 
     async def start(self, source_id: str, *, include_microphone: bool = False):
         from jlt.models import AudioSource

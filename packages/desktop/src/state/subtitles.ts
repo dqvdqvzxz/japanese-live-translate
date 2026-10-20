@@ -34,6 +34,14 @@ export interface LivePartial {
   text: string;
 }
 
+/** A warning or error the backend reported, kept so the log view can list it. */
+export interface ProblemEntry {
+  ts: number;
+  severity: "warning" | "fatal";
+  code: string;
+  message: string;
+}
+
 export interface SubtitleState {
   lines: SubtitleLine[];
   /** The in-progress turn, rendered separately and replaced wholesale. */
@@ -46,6 +54,14 @@ export interface SubtitleState {
   /** Most recent non-fatal problem, cleared when a session starts. */
   warning: string | null;
   fatal: string | null;
+  /**
+   * Every warning and error this window has seen, newest last. Unlike `warning`
+   * and `fatal` it survives a new session: the explanation for yesterday's
+   * silent meeting should still be there when today's starts.
+   */
+  problems: ProblemEntry[];
+  /** How many problems have ever arrived; `problems` is bounded, this is not. */
+  problemCount: number;
   sessionId: string | null;
   stats: SessionStats | null;
 }
@@ -60,12 +76,15 @@ export const initialState: SubtitleState = {
   queueDepth: 0,
   warning: null,
   fatal: null,
+  problems: [],
+  problemCount: 0,
   sessionId: null,
   stats: null,
 };
 
 /** Keeps memory bounded over a long meeting. */
 export const MAX_LINES = 500;
+export const MAX_PROBLEMS = 100;
 
 function sortedInsert(lines: SubtitleLine[], line: SubtitleLine): SubtitleLine[] {
   const next = [...lines, line];
@@ -73,8 +92,27 @@ function sortedInsert(lines: SubtitleLine[], line: SubtitleLine): SubtitleLine[]
   return next.length > MAX_LINES ? next.slice(next.length - MAX_LINES) : next;
 }
 
-export function subtitleReducer(state: SubtitleState, event: JltEvent): SubtitleState {
+/**
+ * Something that happened in this window rather than in the backend.
+ *
+ * Clearing the screen used to be done by feeding the reducer a forged
+ * `session.started`, which also set `capture` to "running": the Start button
+ * turned into Pause with no session behind it, and Stop could only answer
+ * "not running". Local intentions get their own action so they cannot be
+ * mistaken for a statement about the backend.
+ */
+export interface HistoryClearedAction {
+  type: "history.cleared";
+}
+
+export type SubtitleAction = JltEvent | HistoryClearedAction;
+
+export function subtitleReducer(state: SubtitleState, event: SubtitleAction): SubtitleState {
   switch (event.type) {
+    case "history.cleared":
+      // Only what is on screen. Capture state belongs to the backend.
+      return { ...state, lines: [], partial: null };
+
     case "transcript.partial": {
       // A later delta may revise earlier words, so the partial is replaced
       // whole rather than appended to.
@@ -180,6 +218,8 @@ export function subtitleReducer(state: SubtitleState, event: JltEvent): Subtitle
     case "session.started":
       return {
         ...initialState,
+        problems: state.problems,
+        problemCount: state.problemCount,
         sessionId: event.session_id,
         capture: "running",
       };
@@ -187,10 +227,19 @@ export function subtitleReducer(state: SubtitleState, event: JltEvent): Subtitle
     case "session.stopped":
       return { ...state, capture: "stopped", stats: event.stats, partial: null };
 
-    case "error":
+    case "error": {
+      const problem: ProblemEntry = {
+        ts: event.ts,
+        severity: event.severity,
+        code: event.code,
+        message: event.message,
+      };
+      const problems = [...state.problems, problem].slice(-MAX_PROBLEMS);
+      const counted = { ...state, problems, problemCount: state.problemCount + 1 };
       return event.severity === "fatal"
-        ? { ...state, fatal: event.message }
-        : { ...state, warning: event.message };
+        ? { ...counted, fatal: event.message }
+        : { ...counted, warning: event.message };
+    }
 
     default:
       return state;

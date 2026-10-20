@@ -22,13 +22,14 @@ from typing import Any
 
 from ..config import CHANNELS, FRAME_BYTES, FRAME_MS, SAMPLE_RATE_HZ
 from ..logging import get_logger
-from ..models import AudioSource
+from ..models import AudioSource, OutputDevice
 
 log = get_logger(__name__)
 
 _EXIT_PERMISSION_DENIED = 2
 _EXIT_SOURCE_NOT_FOUND = 3
 _GRACEFUL_STOP_TIMEOUT_S = 3.0
+_OUTPUT_PROBE_TIMEOUT_S = 5.0
 
 
 class CaptureError(RuntimeError):
@@ -93,6 +94,9 @@ class AudioCaptureService:
         self._process: asyncio.subprocess.Process | None = None
         self._control_task: asyncio.Task[None] | None = None
         self._level_dbfs: float | None = None
+        #: The helper's latest per-input arrival counters (buffers, peak, any
+        #: rejected buffers). Counts and levels only — never samples.
+        self._stats: dict[str, Any] | None = None
         self._source: AudioSource | None = None
         self._started = asyncio.Event()
         self._start_error: CaptureError | None = None
@@ -130,6 +134,36 @@ class AudioCaptureService:
         payload = json.loads(stdout.decode("utf-8"))
         return [AudioSource.model_validate(item) for item in payload.get("sources", [])]
 
+    async def output_device(self) -> OutputDevice:
+        """The current output device, for showing headphones versus speakers.
+
+        Never raises. The UI polls this, and a probe that fails — helper
+        missing, odd output, timeout — must read as "unknown" rather than as an
+        error banner about something that is only informational.
+        """
+        try:
+            process = await asyncio.create_subprocess_exec(
+                str(self._helper),
+                "--output-device",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+                env={k: v for k, v in os.environ.items() if k != "OPENAI_API_KEY"},
+            )
+            try:
+                stdout, _ = await asyncio.wait_for(
+                    process.communicate(), timeout=_OUTPUT_PROBE_TIMEOUT_S
+                )
+            except TimeoutError:
+                with _suppress_process_errors():
+                    process.kill()
+                    await process.wait()
+                return OutputDevice()
+            if process.returncode != 0:
+                return OutputDevice()
+            return OutputDevice.model_validate(json.loads(stdout.decode("utf-8")))
+        except (OSError, ValueError):
+            return OutputDevice()
+
     # -- lifecycle ----------------------------------------------------------
 
     async def start(self, source_id: str, *, include_microphone: bool = False) -> AudioSource:
@@ -155,6 +189,7 @@ class AudioCaptureService:
         ]
         if include_microphone:
             arguments.append("--mic")
+        self._stats = None
 
         self._process = await asyncio.create_subprocess_exec(
             *arguments,
@@ -184,7 +219,12 @@ class AudioCaptureService:
             raise CaptureError("start_timeout", "The audio helper did not start within 15 seconds.")
 
         assert self._source is not None
-        log.info("capture started", extra={"source_id": source_id})
+        # The microphone flag belongs here: "capturing but silent" cannot be
+        # interpreted without knowing whether the mic was supposed to be in it.
+        log.info(
+            "capture started",
+            extra={"source_id": source_id, "microphone": include_microphone},
+        )
         return self._source
 
     async def frames(self) -> AsyncIterator[bytes]:
@@ -231,7 +271,11 @@ class AudioCaptureService:
 
         log.info(
             "capture stopped",
-            extra={"stats": self._stopped_stats, "warnings": len(self._warnings)},
+            extra={
+                "stats": self._stopped_stats,
+                "source_stats": self._stats,
+                "warnings": len(self._warnings),
+            },
         )
         self._level_dbfs = None
         self._started.clear()
@@ -284,12 +328,20 @@ class AudioCaptureService:
             self._started.set()
         elif kind == "level":
             self._level_dbfs = float(message.get("rms_dbfs", -120.0))
+        elif kind == "stats":
+            self._stats = {key: value for key, value in message.items() if key != "type"}
         elif kind == "warning":
             self._warnings.append(message)
-            log.warning("audio helper warning", extra={"code": message.get("code")})
+            # The message text is the helper's own fixed wording, never meeting
+            # content, and it is what makes the entry readable in the log view.
+            log.warning(
+                "audio helper warning",
+                extra={"code": message.get("code"), "detail": message.get("message")},
+            )
         elif kind == "error":
             code = str(message.get("code", "capture_error"))
             text = str(message.get("message", "Audio capture failed."))
+            log.error("audio helper error", extra={"code": code, "detail": text})
             self._start_error = (
                 PermissionDenied(code, text)
                 if code == "permission_denied"
@@ -304,6 +356,10 @@ class AudioCaptureService:
     @property
     def level_dbfs(self) -> float | None:
         return self._level_dbfs
+
+    @property
+    def stats(self) -> dict[str, Any] | None:
+        return self._stats
 
     @property
     def is_running(self) -> bool:

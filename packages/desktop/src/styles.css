@@ -506,10 +506,48 @@ body {
   overflow-wrap: anywhere;
 }
 
-.controls__mic {
+.controls__output {
   display: inline-flex; align-items: center; gap: 4px;
-  font-size: 11px; color: var(--fg-dim); cursor: pointer; user-select: none;
+  font-size: 11px; color: var(--fg-dim); cursor: default; user-select: none;
 }
-.controls__mic input { margin: 0; cursor: pointer; }
-.controls__mic:has(input:checked) { color: var(--accent); font-weight: 500; }
-.controls__mic:has(input:disabled) { color: var(--fg-faint); cursor: not-allowed; }
+/* A reading, not a switch: it must not look clickable. */
+.controls__output input { margin: 0; cursor: default; }
+.controls__output:has(input:checked) { color: var(--accent); font-weight: 500; }
+.controls__output--unknown { color: var(--fg-faint); }
+
+/* --- log ---------------------------------------------------------------- */
+
+.panel--wide { width: min(460px, 100%); }
+
+.btn__badge {
+  min-width: 14px; padding: 0 4px; border-radius: 8px;
+  background: var(--warn); color: #fff; font-size: 10px; line-height: 14px; text-align: center;
+}
+.btn--alert { border-color: var(--warn); color: var(--warn); }
+.btn--alert-severe { border-color: var(--danger); color: var(--danger); }
+.btn--alert-severe .btn__badge { background: var(--danger); }
+.btn--on .btn__badge { background: #fff; color: var(--accent); }
+
+.log__bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 4px 0 10px; }
+.log__seg { display: inline-flex; gap: 4px; }
+.log__list { list-style: none; margin: 0 0 10px; padding: 0; }
+.log__row {
+  margin-bottom: 6px; padding: 5px 8px;
+  border-left: 3px solid var(--border); border-radius: 0 var(--radius) var(--radius) 0;
+  background: var(--bg);
+}
+.log__row--warning { border-left-color: var(--warn); }
+.log__row--error { border-left-color: var(--danger); }
+.log__head { display: flex; gap: 6px; align-items: baseline; font-size: 10px; color: var(--fg-faint); }
+.log__level { font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+.log__row--warning .log__level { color: var(--warn); }
+.log__row--error .log__level { color: var(--danger); }
+.log__text { margin: 2px 0 0; font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; }
+.log__meta {
+  margin: 2px 0 0; font-family: ui-monospace, monospace; font-size: 10px;
+  color: var(--fg-faint); overflow-wrap: anywhere;
+}
+.log__trace {
+  margin: 4px 0 0; padding: 6px; border-radius: var(--radius); background: var(--bg-elevated);
+  font-family: ui-monospace, monospace; font-size: 10px; white-space: pre-wrap; overflow-wrap: anywhere;
+}

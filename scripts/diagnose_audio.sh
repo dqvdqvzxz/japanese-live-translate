@@ -42,10 +42,42 @@ for s in wanted:
 
 [ -n "$SOURCES" ] || { echo "No Teams, browser or display sources found."; exit 1; }
 
+# The last `stats` message the helper sent: what actually ARRIVED, per input.
+# "buffers 0" = nothing arrived; "out 0" = arrived but unconvertible;
+# "peak -120" with buffers = the OS delivered silence.
+show_stats() {
+  python3 - "$1" <<'PYS'
+import json, sys
+last = None
+try:
+    for line in open(sys.argv[1], errors="replace"):
+        try:
+            msg = json.loads(line)
+        except ValueError:
+            continue
+        if msg.get("type") == "stats":
+            last = msg
+        elif msg.get("type") in ("warning", "error"):
+            print(f"    ! {msg.get('code')}: {msg.get('message')}")
+except OSError:
+    pass
+if last is None:
+    print("    (no stats message - run longer than 5 s, or this is an older helper)")
+for name in ("app", "mic"):
+    s = last.get(name) if last else None
+    if s:
+        fmt = s.get("format") or {}
+        print(f"    {name}: buffers {s['buffers']}, out {s['output_frames']}, "
+              f"peak {s['peak_dbfs']} dBFS, rejected {s['rejected']}, "
+              f"format {fmt.get('rate')}Hz/{fmt.get('channels')}ch/{fmt.get('bits')}bit")
+PYS
+}
+
 printf '%-48s %8s %10s  %s\n' SOURCE PEAK dBFS RESULT
 for SRC in $SOURCES; do
   RAW="${TMPDIR:-/tmp}/jlt-diag.pcm"
-  "$HELPER" --capture "$SRC" --rate 24000 --channels 1 --frame-ms 20 > "$RAW" 2>/dev/null &
+  ERR="${TMPDIR:-/tmp}/jlt-diag.err"
+  "$HELPER" --capture "$SRC" --rate 24000 --channels 1 --frame-ms 20 > "$RAW" 2>"$ERR" &
   PID=$!
   sleep "$SECONDS_EACH"
   kill -INT "$PID" 2>/dev/null || true
@@ -72,7 +104,8 @@ else:
     verdict = "digital silence"
 print(f"{src:<48} {peak:8d} {db:10.1f}  {verdict}")
 PY
-  rm -f "$RAW"
+  show_stats "$ERR"
+  rm -f "$RAW" "$ERR"
 done
 
 echo
@@ -81,19 +114,22 @@ echo
 # identical to having no audio at all. Measuring the ratio catches it.
 echo "Checking output rate (should be ~1.0x realtime)…"
 RAW="${TMPDIR:-/tmp}/jlt-rate.pcm"
-"$HELPER" --capture "$(echo "$SOURCES" | head -1)" --mic --rate 24000 --channels 1 --frame-ms 20 > "$RAW" 2>/dev/null &
+ERR="${TMPDIR:-/tmp}/jlt-rate.err"
+"$HELPER" --capture "$(echo "$SOURCES" | head -1)" --mic --rate 24000 --channels 1 --frame-ms 20 > "$RAW" 2>"$ERR" &
 PID=$!
-sleep 5
+sleep 5.5
 kill -INT "$PID" 2>/dev/null || true
 wait "$PID" 2>/dev/null || true
 python3 - "$RAW" <<'PY2'
 import sys
 seconds = len(open(sys.argv[1], "rb").read()) / 2 / 24000
-ratio = seconds / 5.0
+ratio = seconds / 5.5
 verdict = "ok" if 0.8 <= ratio <= 1.25 else "WRONG — the mixer is off-rate"
-print(f"  {seconds:.2f}s captured in 5.0s  =  {ratio:.2f}x realtime  [{verdict}]")
+print(f"  {seconds:.2f}s captured in 5.5s  =  {ratio:.2f}x realtime  [{verdict}]")
 PY2
-rm -f "$RAW"
+echo "With the microphone on (speak, or play sound near the mic):"
+show_stats "$ERR"
+rm -f "$RAW" "$ERR"
 
 echo
 echo "Pick the source marked AUDIO HERE in the app."

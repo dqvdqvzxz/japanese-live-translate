@@ -68,6 +68,25 @@ export interface Settings {
   api_key_present: boolean;
 }
 
+/** Where the Mac is playing sound; see `teams-audio-tap --output-device`. */
+export interface OutputDevice {
+  name: string;
+  transport: string;
+  data_source: string | null;
+  /** A best guess: an external Bluetooth or USB output is assumed to be a headset. */
+  kind: "headphones" | "speakers" | "other" | "unknown";
+}
+
+/**
+ * One backend log record, as the log view receives it. `ts`, `level`, `logger`
+ * and `msg` are always present; anything else is the structured detail the
+ * call site attached (a code, a count, a source id). Never meeting content.
+ */
+export type LogRecord = { ts: number; level: string; logger: string; msg: string } & Record<
+  string,
+  unknown
+>;
+
 /** An error the UI can act on, rather than a string to print. */
 export class ApiError extends Error {
   constructor(
@@ -135,6 +154,18 @@ export class BackendClient {
     return this.request("/api/audio/sources");
   }
 
+  /** Headphones or speakers. Always resolves: "unknown" is an answer. */
+  getOutputDevice(): Promise<OutputDevice> {
+    return this.request("/api/audio/output");
+  }
+
+  getLogs(
+    level: "warning" | "info" = "warning",
+    limit = 300,
+  ): Promise<{ entries: LogRecord[]; file: string | null }> {
+    return this.request(`/api/logs?level=${level}&limit=${limit}`);
+  }
+
   getSettings(): Promise<Settings> {
     return this.request("/api/settings");
   }
@@ -182,6 +213,11 @@ export class BackendClient {
     return this.request(`/api/history/sessions/${encodeURIComponent(id)}/summary`, {
       method: "POST",
     });
+  }
+
+  /** Deletes every stored session. The backend refuses while one is running. */
+  clearHistory(): Promise<{ status: string }> {
+    return this.request("/api/history", { method: "DELETE" });
   }
 
   deleteSession(id: string): Promise<{ status: string }> {

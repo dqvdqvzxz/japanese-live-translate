@@ -1,3 +1,4 @@
+import type { OutputDevice } from "../api/client";
 import type { AudioSource } from "../types/events";
 
 /** A clock with a counter-clockwise arrow — the usual "history" glyph. */
@@ -16,6 +17,22 @@ function HistoryIcon() {
   );
 }
 
+/** What the output indicator says, from the detected device. */
+function describeOutput(output: OutputDevice | null): { on: boolean; known: boolean; title: string } {
+  if (!output || output.kind === "unknown") {
+    return { on: false, known: false, title: "Không đọc được thiết bị âm thanh đầu ra" };
+  }
+  const name = output.name || output.transport;
+  switch (output.kind) {
+    case "headphones":
+      return { on: true, known: true, title: `Đang dùng tai nghe: ${name} (tự phát hiện)` };
+    case "speakers":
+      return { on: false, known: true, title: `Đang dùng loa ngoài: ${name} (tự phát hiện)` };
+    default:
+      return { on: false, known: true, title: `Thiết bị đầu ra: ${name} (tự phát hiện)` };
+  }
+}
+
 interface Props {
   historyOpen: boolean;
   onToggleHistory: () => void;
@@ -32,8 +49,14 @@ interface Props {
   onToggleAlwaysOnTop: () => void;
   settingsOpen: boolean;
   onOpenSettings: () => void;
-  includeMicrophone: boolean;
-  onToggleMicrophone: () => void;
+  /** Detected output device; null until the first reading arrives. */
+  output: OutputDevice | null;
+  logOpen: boolean;
+  onToggleLog: () => void;
+  /** Warnings and errors not yet seen in the log view. */
+  logUnseen: number;
+  /** True when something is currently failing, not merely noted. */
+  logSevere: boolean;
 }
 
 export function Controls({
@@ -41,8 +64,9 @@ export function Controls({
   sources, selected, onSelect, capture, busy, alwaysOnTop,
   onStart, onStop, onPause, onResume, onToggleAlwaysOnTop,
   settingsOpen, onOpenSettings,
-  includeMicrophone, onToggleMicrophone,
+  output, logOpen, onToggleLog, logUnseen, logSevere,
 }: Props) {
+  const outputState = describeOutput(output);
   const running = capture === "running";
   const paused = capture === "paused";
   const active = running || paused;
@@ -98,20 +122,37 @@ export function Controls({
         </button>
       )}
 
-      {/* Beside the source, not buried in Settings: it changes what is being
-          recorded, so it should be visible while choosing what to record. */}
-      <label className="controls__mic" title="Cũng thu cả microphone và trộn vào">
+      {/* Read-only on purpose: it reports what the Mac is doing rather than
+          asking the user to say. Application audio is captured the same way
+          either way, so there is nothing for a manual switch to change. */}
+      <label
+        className={`controls__output ${outputState.known ? "" : "controls__output--unknown"}`}
+        title={outputState.title}
+      >
         <input
           type="checkbox"
-          checked={includeMicrophone}
-          disabled={active || busy}
-          onChange={onToggleMicrophone}
+          checked={outputState.on}
+          readOnly
+          tabIndex={-1}
+          onClick={(event) => event.preventDefault()}
+          aria-label={outputState.title}
         />
-        Mic
+        Tai nghe
       </label>
 
       <span className="controls__spacer" />
 
+      <button
+        className={`btn btn--icon ${logOpen ? "btn--on" : ""} ${
+          logUnseen > 0 ? (logSevere ? "btn--alert-severe" : "btn--alert") : ""
+        }`}
+        onClick={onToggleLog}
+        aria-pressed={logOpen}
+        title={logUnseen > 0 ? `Log — ${logUnseen} cảnh báo/lỗi chưa xem` : "Log"}
+      >
+        Log
+        {logUnseen > 0 && <span className="btn__badge">{logUnseen > 9 ? "9+" : logUnseen}</span>}
+      </button>
       <button
         className={`btn btn--icon ${alwaysOnTop ? "btn--on" : ""}`}
         onClick={onToggleAlwaysOnTop}

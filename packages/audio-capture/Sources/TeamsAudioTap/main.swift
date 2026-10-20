@@ -3,16 +3,18 @@ import Foundation
 // teams-audio-tap
 //
 //   teams-audio-tap --list-sources
+//   teams-audio-tap --output-device
 //   teams-audio-tap --capture <source-id> [--frame-ms 20]
 //
 // stdout: raw 24 kHz mono signed 16-bit little-endian PCM (capture mode), or a
-//         single JSON object (list mode).
+//         single JSON object (list and output-device modes).
 // stderr: newline-delimited JSON control messages.
 //
 // Protocol: docs/api-design.md §2.
 
 struct Options {
     var listSources = false
+    var outputDevice = false
     var sourceID: String?
     var frameMS = 20
     var includeMicrophone = false
@@ -25,6 +27,8 @@ func parseArguments(_ argv: [String]) -> Options? {
         switch argv[index] {
         case "--list-sources":
             options.listSources = true
+        case "--output-device":
+            options.outputDevice = true
         case "--capture":
             index += 1
             guard index < argv.count else { return nil }
@@ -51,7 +55,9 @@ func parseArguments(_ argv: [String]) -> Options? {
         }
         index += 1
     }
-    guard options.listSources != (options.sourceID != nil) else { return nil }
+    // Exactly one mode.
+    let modes = [options.listSources, options.outputDevice, options.sourceID != nil]
+    guard modes.filter({ $0 }).count == 1 else { return nil }
     return options
 }
 
@@ -59,6 +65,7 @@ func usage() {
     FileHandle.standardError.write(Data("""
     usage:
       teams-audio-tap --list-sources
+      teams-audio-tap --output-device
       teams-audio-tap --capture <source-id> [--mic] [--rate 24000] [--channels 1] [--frame-ms 20]
 
       --mic  also capture the microphone and mix it with the application audio
@@ -84,6 +91,22 @@ func runList() async -> Never {
                              + "Grant it in System Settings > Privacy & Security > Screen Recording.")
         exit(ExitCode.permissionDenied.rawValue)
     }
+}
+
+/// Prints the default output device as one JSON object and exits. Needs no
+/// permission. `{"kind":"unknown"}` when there is no output device at all.
+func runOutputDevice() -> Never {
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.sortedKeys]
+    let payload: Data
+    if let info = OutputDevice.current(), let encoded = try? encoder.encode(info) {
+        payload = encoded
+    } else {
+        payload = Data(#"{"kind":"unknown"}"#.utf8)
+    }
+    FileHandle.standardOutput.write(payload)
+    FileHandle.standardOutput.write(Data([0x0A]))
+    exit(ExitCode.ok.rawValue)
 }
 
 func runCapture(sourceID: String, frameMS: Int, includeMicrophone: Bool) async -> Never {
@@ -143,6 +166,8 @@ guard let options = parseArguments(CommandLine.arguments) else {
 let task = Task {
     if options.listSources {
         await runList()
+    } else if options.outputDevice {
+        runOutputDevice()
     } else {
         await runCapture(sourceID: options.sourceID!,
                          frameMS: options.frameMS,

@@ -493,3 +493,42 @@ def test_turning_persistence_off_stops_writing(client, tmp_path):
     client.patch("/api/settings", headers=AUTH, json={"privacy": {"persist_transcripts": False}})
     body = client.get("/api/history/sessions", headers=AUTH).json()
     assert body["persisting"] is False
+
+
+def test_without_a_buffer_the_logs_endpoint_is_empty_not_an_error(client):
+    body = client.get("/api/logs", headers=AUTH).json()
+    assert body == {"entries": [], "file": None}
+
+
+def test_the_output_endpoint_reports_the_device(client):
+    body = client.get("/api/audio/output", headers=AUTH).json()
+    assert body["kind"] == "speakers"
+    assert body["name"] == "MacBook Pro Speakers"
+    assert client.get("/api/audio/output").status_code == 401
+
+
+def test_history_cannot_be_cleared_while_a_session_is_running(persisting_client):
+    """Clearing deletes the running session's own row, so the meeting being
+    recorded would silently disappear from history when it stopped."""
+    client = persisting_client
+    started = client.post("/api/session/start", json={"source_id": "app:x"}, headers=AUTH).json()[
+        "session_id"
+    ]
+
+    refused = client.delete("/api/history", headers=AUTH)
+    assert refused.status_code == 409
+    assert refused.json()["detail"]["code"] == "session_active"
+
+    client.post("/api/session/stop", headers=AUTH)
+    sessions = client.get("/api/history/sessions", headers=AUTH).json()["sessions"]
+    assert [s["session_id"] for s in sessions] == [started], "the refused clear must not delete"
+
+
+def test_history_is_really_cleared_once_the_session_has_stopped(persisting_client):
+    client = persisting_client
+    client.post("/api/session/start", json={"source_id": "app:x"}, headers=AUTH)
+    client.post("/api/session/stop", headers=AUTH)
+    assert client.get("/api/history/sessions", headers=AUTH).json()["sessions"]
+
+    assert client.delete("/api/history", headers=AUTH).status_code == 200
+    assert client.get("/api/history/sessions", headers=AUTH).json()["sessions"] == []

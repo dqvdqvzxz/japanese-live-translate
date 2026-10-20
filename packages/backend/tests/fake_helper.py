@@ -26,6 +26,7 @@ def emit(**payload: object) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--list-sources", action="store_true")
+    parser.add_argument("--output-device", action="store_true")
     parser.add_argument("--capture")
     parser.add_argument("--rate", default="24000")
     parser.add_argument("--channels", default="1")
@@ -36,6 +37,27 @@ def main() -> int:
     args = parser.parse_args()
 
     mode = os.environ.get("FAKE_HELPER_MODE", "ok")
+
+    # Like the real helper, needs no permission, so it answers before any
+    # permission-failure mode is simulated.
+    if args.output_device:
+        if mode == "bad_output_json":
+            sys.stdout.write("this is not json\n")
+        elif mode == "output_fails":
+            return 1
+        else:
+            sys.stdout.write(
+                json.dumps(
+                    {
+                        "name": "JBL Quantum800",
+                        "transport": "usb",
+                        "data_source": None,
+                        "kind": "headphones",
+                    }
+                )
+                + "\n"
+            )
+        return 0
 
     if mode == "permission_denied":
         emit(type="error", code="permission_denied", message="Screen Recording permission required")
@@ -105,6 +127,19 @@ def main() -> int:
         frames += 1
         if frames % 50 == 0:
             emit(type="level", rms_dbfs=-28.4)
+            # Same shape as the Swift helper's `stats` message.
+            emit(
+                type="stats",
+                app={
+                    "buffers": frames,
+                    "input_frames": frames * 480,
+                    "output_frames": frames * 480,
+                    "peak_dbfs": -23.7,
+                    "rejected": {"format": 0, "buffer_list": 0, "convert": 0},
+                    "format": {"rate": 48000, "channels": 2, "bits": 32, "non_interleaved": True},
+                },
+                **({"mic": {"buffers": 0, "peak_dbfs": -120.0}} if args.mic else {}),
+            )
         time.sleep(0.002)
 
     emit(type="stopped", frames=frames, dropped=0)

@@ -37,7 +37,7 @@ HOST = "127.0.0.1"
 
 
 async def run() -> int:
-    jlt_logging.configure(os.environ.get("JLT_LOG_LEVEL", "INFO"))
+    log_buffer = jlt_logging.configure(os.environ.get("JLT_LOG_LEVEL", "INFO"))
     log = jlt_logging.get_logger("jlt")
 
     from .secrets import load_api_key
@@ -88,6 +88,7 @@ async def run() -> int:
         session=session,
         dispatcher=dispatcher,
         started_at=loop.time(),
+        log_buffer=log_buffer,
     )
 
     config = uvicorn.Config(app, host=HOST, port=0, log_config=None, access_log=False)

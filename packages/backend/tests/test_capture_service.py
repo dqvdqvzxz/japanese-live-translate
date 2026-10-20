@@ -181,3 +181,75 @@ async def test_the_mic_flag_is_passed_only_when_asked(shim: Path, monkeypatch):
     await svc.start("app:x", include_microphone=True)
     await svc.stop()
     assert "--mic" in recorded[-1]
+
+
+async def test_the_helpers_arrival_stats_are_exposed(shim: Path):
+    """`frames_in` only counts the helper's own clock, so what actually arrived
+    from each input has to come from the helper — and be kept for the log."""
+    os.environ["FAKE_HELPER_MODE"] = "ok"
+    svc = AudioCaptureService(helper_path=shim)
+    await svc.start("app:x", include_microphone=True)
+    try:
+        for _ in range(200):
+            if svc.stats is not None:
+                break
+            await asyncio.sleep(0.02)
+        assert svc.stats is not None, "no stats message was picked up"
+        assert "type" not in svc.stats
+        assert svc.stats["app"]["peak_dbfs"] == -23.7
+        assert svc.stats["app"]["rejected"] == {"format": 0, "buffer_list": 0, "convert": 0}
+        assert svc.stats["mic"]["buffers"] == 0
+    finally:
+        await svc.stop()
+    assert svc.stats is not None, "the last stats must survive stop() for the final log line"
+
+
+async def test_the_start_log_says_whether_the_microphone_was_requested(shim: Path, caplog):
+    """A silent capture cannot be read without knowing if the mic was meant to
+    be in it; the log used to record only the source id."""
+    import logging
+
+    os.environ["FAKE_HELPER_MODE"] = "ok"
+    for requested in (False, True):
+        caplog.clear()
+        svc = AudioCaptureService(helper_path=shim)
+        with caplog.at_level(logging.INFO, logger="jlt.audio.capture_service"):
+            await svc.start("app:x", include_microphone=requested)
+        await svc.stop()
+        record = next(r for r in caplog.records if r.getMessage() == "capture started")
+        assert record.microphone is requested  # type: ignore[attr-defined]
+
+
+async def test_output_device_is_read_from_the_helper(shim: Path):
+    os.environ["FAKE_HELPER_MODE"] = "ok"
+    device = await AudioCaptureService(helper_path=shim).output_device()
+    assert device.kind == "headphones"
+    assert device.name == "JBL Quantum800"
+    assert device.transport == "usb"
+
+
+@pytest.mark.parametrize("mode", ["bad_output_json", "output_fails"])
+async def test_output_device_never_raises_it_just_reads_unknown(shim: Path, mode: str):
+    """The UI polls this. An unreadable device is informational, not an error."""
+    os.environ["FAKE_HELPER_MODE"] = mode
+    device = await AudioCaptureService(helper_path=shim).output_device()
+    assert device.kind == "unknown"
+
+
+async def test_output_device_with_a_missing_helper_reads_unknown(tmp_path: Path):
+    device = await AudioCaptureService(helper_path=tmp_path / "nope").output_device()
+    assert device.kind == "unknown"
+
+
+async def test_helper_warnings_are_logged_with_their_text(shim: Path, caplog):
+    """The code alone ("no_app_buffers") is not enough to read the log view."""
+    import logging
+
+    svc = AudioCaptureService(helper_path=shim)
+    with caplog.at_level(logging.WARNING, logger="jlt.audio.capture_service"):
+        svc._handle_control({"type": "warning", "code": "no_audio", "message": "No audio for 10s"})
+        svc._handle_control({"type": "error", "code": "start_failed", "message": "It broke"})
+    warning = next(r for r in caplog.records if r.getMessage() == "audio helper warning")
+    assert warning.detail == "No audio for 10s"  # type: ignore[attr-defined]
+    error = next(r for r in caplog.records if r.getMessage() == "audio helper error")
+    assert error.code == "start_failed"  # type: ignore[attr-defined]

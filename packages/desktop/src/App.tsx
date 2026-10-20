@@ -1,9 +1,16 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
-import { ApiError, BackendClient, resolveBackend, type Settings } from "./api/client";
+import {
+  ApiError,
+  BackendClient,
+  resolveBackend,
+  type OutputDevice,
+  type Settings,
+} from "./api/client";
 import { startMockStream } from "./api/mock";
 import { setAlwaysOnTop } from "./api/tauri";
 import { Controls } from "./components/Controls";
 import { HistorySidebar } from "./components/HistorySidebar";
+import { LogPanel } from "./components/LogPanel";
 import { RecordView } from "./components/RecordView";
 import { NameRecordingDialog } from "./components/NameRecordingDialog";
 import { PermissionDialog } from "./components/PermissionDialog";
@@ -11,7 +18,7 @@ import { SettingsPanel } from "./components/SettingsPanel";
 import { StatusBar } from "./components/StatusBar";
 import { TitleBar } from "./components/TitleBar";
 import { SubtitleView } from "./components/SubtitleView";
-import { initialState, subtitleReducer } from "./state/subtitles";
+import { initialState, subtitleReducer, type ProblemEntry } from "./state/subtitles";
 import type { AudioSource } from "./types/events";
 import type { SessionRecord, StoredSegment } from "./api/client";
 
@@ -26,7 +33,13 @@ const FALLBACK_SETTINGS: Settings = {
   api_key_present: false,
 };
 
-type Panel = "none" | "settings";
+type Panel = "none" | "settings" | "log";
+
+/** Failures of this window's own actions kept for the log view. */
+const MAX_APP_PROBLEMS = 50;
+
+/** Backend answers meaning the window's idea of the session state is out of date. */
+const STATE_MISMATCH = new Set(["not_running", "not_paused", "already_running"]);
 
 export default function App() {
   const [state, dispatch] = useReducer(subtitleReducer, initialState);
@@ -37,6 +50,11 @@ export default function App() {
   const [selected, setSelected] = useState("");
   const [settings, setSettings] = useState<Settings | null>(null);
   const [panel, setPanel] = useState<Panel>("none");
+  const [output, setOutput] = useState<OutputDevice | null>(null);
+  const [appProblems, setAppProblems] = useState<ProblemEntry[]>([]);
+  const [appProblemCount, setAppProblemCount] = useState(0);
+  /** `problemCount + appProblemCount` as of the last time the log was open. */
+  const [seenProblems, setSeenProblems] = useState(0);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [permissionError, setPermissionError] = useState<string | null>(null);
@@ -139,12 +157,55 @@ export default function App() {
 
   /** A permission failure needs a dialog with a way out, not a red banner. */
   const report = useCallback((error: unknown) => {
+    const message = error instanceof ApiError ? error.message : String(error);
+    // Kept for the log view: the backend never logs a Start it refused, so
+    // without this the reason would vanish with the banner.
+    setAppProblems((list) =>
+      [
+        ...list,
+        {
+          ts: Date.now() / 1000,
+          severity: "fatal" as const,
+          code: error instanceof ApiError ? error.code : "error",
+          message,
+        },
+      ].slice(-MAX_APP_PROBLEMS),
+    );
+    setAppProblemCount((n) => n + 1);
+
     if (error instanceof ApiError && error.code === "permission_denied") {
       setPermissionError(error.message);
       return;
     }
-    setActionError(error instanceof ApiError ? error.message : String(error));
+    setActionError(message);
   }, []);
+
+  /**
+   * Re-read what the backend is actually doing and adopt it.
+   *
+   * The window can come to disagree with the backend — it shows "running"
+   * while nothing is. Without a way back, Stop only ever answers "not
+   * running" and the Start button never returns.
+   */
+  const resync = useCallback(async () => {
+    if (!client) return;
+    try {
+      const current = await client.getSession();
+      dispatch({
+        type: "status",
+        ts: Date.now() / 1000,
+        session_id: current.session_id ?? "",
+        capture: current.state as never,
+        stt: current.session_id ? "connected" : "disconnected",
+        translation: "ready",
+        audio_level_dbfs: null,
+        queue_depth: 0,
+        detail: null,
+      });
+    } catch {
+      // Offline: the connection indicator already says so.
+    }
+  }, [client]);
 
   const run = useCallback(
     async (action: () => Promise<unknown>) => {
@@ -154,11 +215,14 @@ export default function App() {
         await action();
       } catch (error) {
         report(error);
+        // These codes mean "that is not the state I am in", i.e. the window
+        // was wrong. Say what is true instead of leaving it stuck.
+        if (error instanceof ApiError && STATE_MISMATCH.has(error.code)) void resync();
       } finally {
         setBusy(false);
       }
     },
-    [report],
+    [report, resync],
   );
 
   const refreshHistory = useCallback(async () => {
@@ -171,6 +235,22 @@ export default function App() {
       report(error);
     }
   }, [client, report]);
+
+  const clearHistory = useCallback(() => {
+    if (!client) {
+      // Demo mode has nothing stored; clear what is on screen.
+      dispatch({ type: "history.cleared" });
+      return;
+    }
+    void run(async () => {
+      await client.clearHistory();
+      // Only after the backend has really deleted: emptying the window first
+      // would claim a deletion that may have been refused.
+      dispatch({ type: "history.cleared" });
+      setViewing(null);
+      await refreshHistory();
+    });
+  }, [client, run, refreshHistory]);
 
   useEffect(() => {
     if (historyOpen) void refreshHistory();
@@ -202,6 +282,35 @@ export default function App() {
     },
     [client, run],
   );
+
+  // Headphones or speakers, read from the system rather than asked of the user.
+  // Polled because the device changes when a headset is plugged in or out, and
+  // cheap because each reading is one short helper invocation.
+  useEffect(() => {
+    if (!client) return;
+    let cancelled = false;
+    const read = async () => {
+      try {
+        const device = await client.getOutputDevice();
+        if (!cancelled) setOutput(device);
+      } catch {
+        // Informational only; keep the last reading rather than flash an error.
+      }
+    };
+    void read();
+    const timer = window.setInterval(() => void read(), 5000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [client]);
+
+  const totalProblems = state.problemCount + appProblemCount;
+  // Everything is "seen" while the log is open, including what arrives then.
+  useEffect(() => {
+    if (panel === "log") setSeenProblems(totalProblems);
+  }, [panel, totalProblems]);
+  const logUnseen = Math.max(0, totalProblems - seenProblems);
 
   const toggleAlwaysOnTop = useCallback(() => {
     const next = !(settings?.ui.always_on_top ?? true);
@@ -273,12 +382,11 @@ export default function App() {
         onResume={() => client && run(() => client.resume())}
         onToggleAlwaysOnTop={toggleAlwaysOnTop}
         settingsOpen={panel === "settings"}
-        includeMicrophone={settings?.audio.include_microphone ?? false}
-        onToggleMicrophone={() =>
-          patchSettings({
-            audio: { include_microphone: !(settings?.audio.include_microphone ?? false) },
-          })
-        }
+        output={output}
+        logOpen={panel === "log"}
+        onToggleLog={() => setPanel(panel === "log" ? "none" : "log")}
+        logUnseen={logUnseen}
+        logSevere={Boolean(state.fatal || actionError)}
         onOpenSettings={() => setPanel(panel === "settings" ? "none" : "settings")}
       />
 
@@ -360,16 +468,21 @@ export default function App() {
         ) : (
           content
         )}
+        {panel === "log" && (
+          <LogPanel
+            client={client}
+            problems={state.problems}
+            appProblems={appProblems}
+            onClose={() => setPanel("none")}
+          />
+        )}
         {panel === "settings" && (
           <SettingsPanel
             settings={settings}
             onPatch={patchSettings}
             onClose={() => setPanel("none")}
-            onClearHistory={() => dispatch({
-              type: "session.started", ts: Date.now() / 1000,
-              session_id: state.sessionId ?? "s_cleared",
-              source: { id: selected, kind: "application", name: "cleared" },
-            })}
+            capturing={state.capture === "running" || state.capture === "paused"}
+            onClearHistory={clearHistory}
           />
         )}
       </main>

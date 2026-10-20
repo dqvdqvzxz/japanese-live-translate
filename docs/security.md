@@ -41,6 +41,12 @@ refuses `/api/session/start` with `409 api_key_missing`.
 and the session bearer token from every record, including exception tracebacks,
 as defence in depth even though the key should never reach a log call.
 
+The UI's log view reads `GET /api/logs`, which serves the last 500 records from
+an in-memory ring that sits behind the same filter and the same JSON formatter
+as the log file, so it can never show more than the file does. The route
+requires the bearer token like every other `/api` route, and the view's Copy
+button exists to put exactly those redacted records into a bug report.
+
 ## 3. Local transport
 
 - `uvicorn` binds `127.0.0.1` with an ephemeral port chosen by the OS; the port

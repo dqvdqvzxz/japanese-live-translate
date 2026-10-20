@@ -34,6 +34,20 @@ class AudioSource(BaseModel):
     is_recommended: bool = False
 
 
+class OutputDevice(BaseModel):
+    """Where the Mac is playing sound, from `teams-audio-tap --output-device`.
+
+    Informational only: application audio is tapped before it reaches the
+    output device, so nothing about capture depends on this. `kind` is a best
+    guess — an external Bluetooth or USB output is assumed to be a headset.
+    """
+
+    name: str = ""
+    transport: str = "unknown"
+    data_source: str | None = None
+    kind: Literal["headphones", "speakers", "other", "unknown"] = "unknown"
+
+
 class Usage(BaseModel):
     input_tokens: int = 0
     output_tokens: int = 0

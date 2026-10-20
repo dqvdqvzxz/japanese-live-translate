@@ -33,7 +33,17 @@ final class AudioTap: NSObject, SCStreamOutput, SCStreamDelegate {
     private var converterInputFormat: AVAudioFormat?
     private var micConverter: AVAudioConverter?
     private var micConverterInputFormat: AVAudioFormat?
-    private var micFrames = 0
+
+    /// What actually arrived from each input; reported from the drain thread.
+    private let appStats = SourceStats()
+    private let micStats = SourceStats()
+    /// True only once the `.microphone` output is registered, which is not the
+    /// same as the microphone having been requested: a denied permission or an
+    /// unsupported OS leaves it false.
+    private var micActive = false
+    private var streamStartedAt = Date()
+    private var lastStatsEmit = Date()
+    private var diagnosed = Set<String>()
 
     private let sampleQueue = DispatchQueue(label: "jlt.audiotap.samples",
                                             qos: .userInitiated)
@@ -158,6 +168,7 @@ final class AudioTap: NSObject, SCStreamOutput, SCStreamDelegate {
         if includeMicrophone, #available(macOS 15.0, *), config.captureMicrophone {
             do {
                 try stream.addStreamOutput(self, type: .microphone, sampleHandlerQueue: micQueue)
+                micActive = true
             } catch {
                 // Losing the microphone should not lose the meeting: carry on
                 // with application audio and say what happened.
@@ -200,6 +211,8 @@ final class AudioTap: NSObject, SCStreamOutput, SCStreamDelegate {
             let handle = FileHandle.standardOutput
             let frameInterval = Double(self.frameMS) / 1000.0
             var nextDeadline = Date().timeIntervalSinceReferenceDate
+            self.streamStartedAt = Date()
+            self.lastStatsEmit = Date()
 
             while !Thread.current.isCancelled && !self.stopping.value {
                 // Paced by the wall clock, one frame per frame interval.
@@ -215,6 +228,7 @@ final class AudioTap: NSObject, SCStreamOutput, SCStreamDelegate {
                 let chunk = self.mixedFrame()
                 handle.write(Data(chunk))
                 self.framesWritten += 1
+                self.reportIfDue()
 
                 let sleepFor = nextDeadline - Date().timeIntervalSinceReferenceDate
                 if sleepFor > 0 {
@@ -306,11 +320,16 @@ final class AudioTap: NSObject, SCStreamOutput, SCStreamDelegate {
         guard type == .audio else { return }
         guard let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer),
               let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(formatDescription) else {
+            appStats.reject(.format)
             return
         }
 
         var streamDescription = asbd.pointee
-        guard let inputFormat = AVAudioFormat(streamDescription: &streamDescription) else { return }
+        appStats.received(frames: CMSampleBufferGetNumSamples(sampleBuffer), format: streamDescription)
+        guard let inputFormat = AVAudioFormat(streamDescription: &streamDescription) else {
+            appStats.reject(.format)
+            return
+        }
 
         if converterInputFormat != inputFormat {
             // First buffer, or the system changed format mid-stream (output
@@ -319,18 +338,25 @@ final class AudioTap: NSObject, SCStreamOutput, SCStreamDelegate {
             converter?.sampleRateConverterQuality = AVAudioQuality.high.rawValue
             converterInputFormat = inputFormat
         }
-        guard let converter else { return }
+        guard let converter else {
+            appStats.reject(.convert)
+            return
+        }
 
         do {
             try sampleBuffer.withAudioBufferList { audioBufferList, _ in
                 guard let input = AVAudioPCMBuffer(pcmFormat: inputFormat,
                                                    bufferListNoCopy: audioBufferList.unsafePointer)
-                else { return }
-                convertAndEnqueue(input, using: converter)
+                else {
+                    appStats.reject(.bufferList)
+                    return
+                }
+                enqueue(input, using: converter, into: ring, counting: appStats)
             }
         } catch {
-            // A malformed buffer is not fatal; drop it and keep the stream alive.
-            return
+            // A malformed buffer is not fatal; drop it and keep the stream
+            // alive — but count it, so a stream of them is not invisible.
+            appStats.reject(.bufferList, errorCode: (error as NSError).code)
         }
     }
 
@@ -338,63 +364,56 @@ final class AudioTap: NSObject, SCStreamOutput, SCStreamDelegate {
     private func handleMicrophone(_ sampleBuffer: CMSampleBuffer) {
         guard let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer),
               let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(formatDescription)
-        else { return }
+        else {
+            micStats.reject(.format)
+            return
+        }
 
         var streamDescription = asbd.pointee
-        guard let inputFormat = AVAudioFormat(streamDescription: &streamDescription) else { return }
+        micStats.received(frames: CMSampleBufferGetNumSamples(sampleBuffer), format: streamDescription)
+        guard let inputFormat = AVAudioFormat(streamDescription: &streamDescription) else {
+            micStats.reject(.format)
+            return
+        }
 
         if micConverterInputFormat != inputFormat {
             micConverter = AVAudioConverter(from: inputFormat, to: outputFormat)
             micConverter?.sampleRateConverterQuality = AVAudioQuality.high.rawValue
             micConverterInputFormat = inputFormat
         }
-        guard let micConverter else { return }
+        guard let micConverter else {
+            micStats.reject(.convert)
+            return
+        }
 
-        try? sampleBuffer.withAudioBufferList { audioBufferList, _ in
-            guard let input = AVAudioPCMBuffer(pcmFormat: inputFormat,
-                                               bufferListNoCopy: audioBufferList.unsafePointer)
-            else { return }
-            guard let output = convert(input, using: micConverter) else { return }
-            let byteCount = Int(output.frameLength) * Self.bytesPerSample
-            guard let channelData = output.int16ChannelData else { return }
-            _ = channelData[0].withMemoryRebound(to: UInt8.self, capacity: byteCount) { raw in
-                micRing.write(UnsafeRawBufferPointer(start: raw, count: byteCount))
+        do {
+            try sampleBuffer.withAudioBufferList { audioBufferList, _ in
+                guard let input = AVAudioPCMBuffer(pcmFormat: inputFormat,
+                                                   bufferListNoCopy: audioBufferList.unsafePointer)
+                else {
+                    micStats.reject(.bufferList)
+                    return
+                }
+                enqueue(input, using: micConverter, into: micRing, counting: micStats)
             }
-            micFrames += 1
+        } catch {
+            micStats.reject(.bufferList, errorCode: (error as NSError).code)
         }
     }
 
-    /// Shared conversion to 24 kHz mono int16, used by both inputs.
-    private func convert(_ input: AVAudioPCMBuffer,
-                         using converter: AVAudioConverter) -> AVAudioPCMBuffer? {
-        let ratio = outputFormat.sampleRate / input.format.sampleRate
-        let capacity = AVAudioFrameCount(Double(input.frameLength) * ratio) + 32
-        guard capacity > 0,
-              let output = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: capacity)
-        else { return nil }
-
-        var consumed = false
-        var conversionError: NSError?
-        let status = converter.convert(to: output, error: &conversionError) { _, outStatus in
-            if consumed {
-                outStatus.pointee = .noDataNow
-                return nil
-            }
-            consumed = true
-            outStatus.pointee = .haveData
-            return input
-        }
-        guard status != .error, output.frameLength > 0 else { return nil }
-        return output
-    }
-
-    private func convertAndEnqueue(_ input: AVAudioPCMBuffer, using converter: AVAudioConverter) {
+    /// Convert one input buffer to 24 kHz mono int16 and append it to `ring`.
+    /// Shared by both inputs, so they cannot drift apart in behaviour.
+    private func enqueue(_ input: AVAudioPCMBuffer,
+                         using converter: AVAudioConverter,
+                         into ring: PCMRing,
+                         counting stats: SourceStats) {
         let ratio = outputFormat.sampleRate / input.format.sampleRate
         // +32 frames of slack absorbs the resampler's fractional carry.
         let capacity = AVAudioFrameCount(Double(input.frameLength) * ratio) + 32
-        guard capacity > 0,
-              let output = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: capacity)
-        else { return }
+        guard let output = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: capacity) else {
+            stats.reject(.convert)
+            return
+        }
 
         var consumed = false
         var conversionError: NSError?
@@ -408,14 +427,73 @@ final class AudioTap: NSObject, SCStreamOutput, SCStreamDelegate {
             return input
         }
 
-        guard status != .error, output.frameLength > 0,
-              let channelData = output.int16ChannelData else { return }
+        guard status != .error, let channelData = output.int16ChannelData else {
+            stats.reject(.convert, errorCode: conversionError?.code ?? 0)
+            return
+        }
+        // A resampler may legitimately emit nothing for a very short input
+        // while it fills its filter; that is not a failure.
+        guard output.frameLength > 0 else { return }
 
+        stats.converted(UnsafeBufferPointer(start: channelData[0], count: Int(output.frameLength)))
         let byteCount = Int(output.frameLength) * Self.bytesPerSample
         _ = channelData[0].withMemoryRebound(to: UInt8.self, capacity: byteCount) { raw in
             ring.write(UnsafeRawBufferPointer(start: raw, count: byteCount))
         }
+    }
 
+    // MARK: - Arrival statistics
+
+    /// How long to wait before concluding a source is not delivering.
+    private static let diagnoseAfter: TimeInterval = 8
+    private static let statsInterval: TimeInterval = 5
+
+    /// Called from the drain thread once per frame; does real work every
+    /// `statsInterval` seconds only.
+    private func reportIfDue() {
+        let now = Date()
+        guard now.timeIntervalSince(lastStatsEmit) >= Self.statsInterval else { return }
+        lastStatsEmit = now
+
+        let app = appStats.snapshot()
+        let mic = micActive ? micStats.snapshot() : nil
+        Control.stats(app: app.json, mic: mic?.json)
+
+        let elapsed = now.timeIntervalSince(streamStartedAt)
+        guard elapsed >= Self.diagnoseAfter else { return }
+        diagnose(app, label: "app", elapsed: elapsed)
+        if let mic { diagnose(mic, label: "mic", elapsed: elapsed) }
+    }
+
+    /// Name the failure, once. The three cases have different causes, so they
+    /// get different codes and the message says what to try.
+    private func diagnose(_ s: SourceStats.Snapshot, label: String, elapsed: TimeInterval) {
+        let seconds = Int(elapsed)
+        let code: String
+        let message: String
+        if s.buffers == 0 {
+            code = "no_\(label)_buffers"
+            message = label == "app"
+                ? "ScreenCaptureKit has delivered no audio from the selected application in \(seconds)s: "
+                  + "none of the processes it matched is playing sound. Try 'Entire system audio'."
+                : "The microphone is on, but ScreenCaptureKit has delivered no microphone audio in \(seconds)s."
+        } else if s.outputFrames == 0 {
+            code = "\(label)_convert_failed"
+            message = "Audio from the \(label == "app" ? "application" : "microphone") is arriving "
+                    + "but cannot be converted to the transcription format (\(s.rate) Hz, "
+                    + "\(s.channels) ch, \(s.bits)-bit)."
+        } else if s.peak == 0 {
+            code = "\(label)_all_zero"
+            message = label == "app"
+                ? "The selected application is delivering audio, but every sample has been zero for "
+                  + "\(seconds)s. Try 'Entire system audio'."
+                : "The microphone is delivering audio, but every sample has been zero for \(seconds)s. "
+                  + "Check the input device and input volume in System Settings > Sound > Input."
+        } else {
+            return
+        }
+        guard diagnosed.insert(code).inserted else { return }
+        Control.warning(code: code, message: message)
     }
 
     // MARK: - Level metering and silence detection

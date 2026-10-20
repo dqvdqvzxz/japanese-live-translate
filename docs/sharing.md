@@ -63,17 +63,26 @@ You need an OpenAI project with access to `gpt-live-transcribe` and
 1. Pick the application playing the meeting audio — **Microsoft Teams** for the
    desktop app, your **browser** for Teams on the web, or **Entire system
    audio** if unsure.
-2. If the Japanese is being spoken **in the room** rather than coming out of
-   the app — an in-person meeting, or a speakerphone — tick **Mic** beside the
-   source. macOS will ask for Microphone permission the first time. This also
-   records you and anyone near you, so it is off until you turn it on.
-3. Press **Start**.
-4. Japanese appears as it is spoken; Vietnamese appears underneath each
+2. Application audio is always captured. The **Tai nghe** box beside the
+   source is not a switch: it shows what the Mac is using right now — ticked
+   for headphones or a headset, empty for the speakers — and updates by itself
+   when you plug something in. Capture works the same either way.
+3. If the Japanese is being spoken **in the room** rather than coming out of
+   the app — an in-person meeting, or a speakerphone — turn on **Thu thêm
+   microphone** in Settings > Audio. macOS will ask for Microphone permission
+   the first time. This also records you and anyone near you, so it is off
+   until you turn it on.
+4. Press **Start**.
+5. Japanese appears as it is spoken; Vietnamese appears underneath each
    finished sentence.
 
 The bar at the bottom always shows whether audio is being captured, and the
 level meter moves when sound is actually arriving. If it stays flat while
-people are talking, the wrong source is selected.
+people are talking, the wrong source is selected — or something is wrong that
+the **Log** button will say. It lights up with a count whenever there is a
+warning or error you have not seen; it lists them newest first, can copy them
+for a bug report, and opens the log file in Finder. The log holds counts,
+codes and latencies only — never meeting text and never your API key.
 
 ## What happens to your meeting audio
 

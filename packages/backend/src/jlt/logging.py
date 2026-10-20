@@ -15,6 +15,7 @@ import logging
 import os
 import re
 import sys
+from collections import deque
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any
@@ -84,6 +85,45 @@ class JsonFormatter(logging.Formatter):
         return _scrub(json.dumps(payload, ensure_ascii=False, default=str))
 
 
+class RingBufferHandler(logging.Handler):
+    """Keeps the most recent records in memory for the UI's log view.
+
+    Records are stored in the same redacted JSON shape as the log file, so what
+    the view shows can never contain more than the file already does: counts,
+    ids, codes and latencies — never meeting content, never a credential.
+    """
+
+    def __init__(self, capacity: int = 500, *, path: Path | None = None) -> None:
+        super().__init__()
+        self._entries: deque[dict[str, Any]] = deque(maxlen=capacity)
+        self._path = path
+        self.setFormatter(JsonFormatter())
+        self.addFilter(RedactionFilter())
+
+    @property
+    def path(self) -> Path | None:
+        return self._path
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            self._entries.append(json.loads(self.format(record)))
+        except Exception:
+            self.handleError(record)
+
+    def records(self, *, min_level: str = "warning", limit: int = 200) -> list[dict[str, Any]]:
+        floor = logging.WARNING if min_level == "warning" else logging.NOTSET
+        levels = logging.getLevelNamesMapping()
+        # Under the handler's own lock: records are appended from several
+        # threads, and copying a deque while it changes is an error.
+        self.acquire()
+        try:
+            snapshot = list(self._entries)
+        finally:
+            self.release()
+        kept = [e for e in snapshot if levels.get(str(e.get("level", "")).upper(), 0) >= floor]
+        return kept[-limit:]
+
+
 def default_log_path() -> Path:
     override = os.environ.get("JLT_LOG_FILE")
     if override:
@@ -91,7 +131,7 @@ def default_log_path() -> Path:
     return Path.home() / "Library" / "Logs" / "JapaneseLiveTranslator" / "backend.log"
 
 
-def configure(level: str = "INFO", *, log_file: Path | None = None) -> None:
+def configure(level: str = "INFO", *, log_file: Path | None = None) -> RingBufferHandler:
     """Install JSON logging on stderr and, where possible, a rotating file.
 
     stderr, not stdout: stdout is the handshake channel to the Rust supervisor
@@ -106,13 +146,15 @@ def configure(level: str = "INFO", *, log_file: Path | None = None) -> None:
     redaction = RedactionFilter()
 
     handlers: list[logging.Handler] = []
+    path = log_file or default_log_path()
+    ring = RingBufferHandler(path=path)
+    handlers.append(ring)
 
     stream = logging.StreamHandler(sys.stderr)
     stream.setFormatter(formatter)
     stream.addFilter(redaction)
     handlers.append(stream)
 
-    path = log_file or default_log_path()
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         # Bounded: a long meeting should not fill the disk, and nobody reads
@@ -135,6 +177,7 @@ def configure(level: str = "INFO", *, log_file: Path | None = None) -> None:
     # uvicorn's access log would record query strings, which carry the loopback
     # token. Silence it rather than rely on redaction.
     logging.getLogger("uvicorn.access").disabled = True
+    return ring
 
 
 def get_logger(name: str) -> logging.Logger:

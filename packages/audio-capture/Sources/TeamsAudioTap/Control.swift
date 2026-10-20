@@ -31,6 +31,14 @@ enum Control {
         emit(["type": "level", "rms_dbfs": (rmsDBFS * 10).rounded() / 10])
     }
 
+    /// Per-source arrival counters, every few seconds. See `SourceStats`.
+    /// `mic` is omitted when the microphone is not part of the stream.
+    static func stats(app: [String: Any], mic: [String: Any]?) {
+        var object: [String: Any] = ["type": "stats", "app": app]
+        if let mic { object["mic"] = mic }
+        emit(object)
+    }
+
     static func warning(code: String, message: String) {
         emit(["type": "warning", "code": code, "message": message])
     }

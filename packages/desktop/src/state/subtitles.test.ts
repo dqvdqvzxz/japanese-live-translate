@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { JltEvent } from "../types/events";
-import { MAX_LINES, initialState, subtitleReducer, type SubtitleState } from "./subtitles";
+import {
+  MAX_LINES,
+  MAX_PROBLEMS,
+  initialState,
+  subtitleReducer,
+  type SubtitleState,
+} from "./subtitles";
 
 function reduce(events: JltEvent[], from: SubtitleState = initialState): SubtitleState {
   return events.reduce(subtitleReducer, from);
@@ -171,5 +177,77 @@ describe("status and lifecycle", () => {
     ]);
     expect(state.capture).toBe("stopped");
     expect(state.stats?.segments_translated).toBe(10);
+  });
+
+  it("keeps every warning and error for the log view", () => {
+    const state = reduce([
+      { ...base, ts: 10, type: "error", severity: "warning", code: "no_app_audio",
+        message: "No audio.", retryable: false },
+      { ...base, ts: 20, type: "error", severity: "fatal", code: "stt_failed",
+        message: "Transcription stopped.", retryable: false },
+    ]);
+    expect(state.problems.map((p) => [p.ts, p.severity, p.code])).toEqual([
+      [10, "warning", "no_app_audio"],
+      [20, "fatal", "stt_failed"],
+    ]);
+    expect(state.problemCount).toBe(2);
+  });
+
+  it("does not forget problems when the next session starts", () => {
+    const dirty = reduce([
+      { ...base, type: "error", severity: "warning", code: "app_all_zero",
+        message: "Silent.", retryable: false },
+    ]);
+    const next = subtitleReducer(dirty, {
+      ...base, type: "session.started",
+      source: { id: "app:x", kind: "application", name: "Teams" },
+    });
+    expect(next.warning).toBeNull();
+    expect(next.problems).toHaveLength(1);
+    expect(next.problemCount).toBe(1);
+  });
+
+  it("bounds the problem list but keeps counting", () => {
+    const events: JltEvent[] = Array.from({ length: MAX_PROBLEMS + 20 }, (_, i) => ({
+      ...base, ts: i, type: "error" as const, severity: "warning" as const,
+      code: `c${i}`, message: `m${i}`, retryable: false,
+    }));
+    const state = reduce(events);
+    expect(state.problems).toHaveLength(MAX_PROBLEMS);
+    expect(state.problems.at(-1)?.code).toBe(`c${MAX_PROBLEMS + 19}`);
+    expect(state.problemCount).toBe(MAX_PROBLEMS + 20);
+  });
+
+  it("clearing history empties the screen without touching the capture state", () => {
+    // The bug this guards: clearing used to be done with a forged
+    // `session.started`, which flipped the Start button to Pause.
+    const idle = reduce([translated("seg_1", 1, "古い。", "Cũ.")]);
+    expect(idle.capture).toBe("idle");
+
+    const cleared = subtitleReducer(idle, { type: "history.cleared" });
+    expect(cleared.lines).toHaveLength(0);
+    expect(cleared.partial).toBeNull();
+    expect(cleared.capture).toBe("idle");
+    expect(cleared.sessionId).toBe(idle.sessionId);
+
+    const running = reduce([
+      { ...base, type: "status", capture: "running", stt: "connected",
+        translation: "ready", audio_level_dbfs: null, queue_depth: 0, detail: null },
+    ]);
+    expect(subtitleReducer(running, { type: "history.cleared" }).capture).toBe("running");
+  });
+
+  it("a status from the backend corrects a window that wrongly shows running", () => {
+    const wrong = subtitleReducer(initialState, {
+      ...base, type: "session.started",
+      source: { id: "app:x", kind: "application", name: "Teams" },
+    });
+    expect(wrong.capture).toBe("running");
+
+    const corrected = subtitleReducer(wrong, {
+      ...base, type: "status", capture: "idle", stt: "disconnected",
+      translation: "ready", audio_level_dbfs: null, queue_depth: 0, detail: null,
+    });
+    expect(corrected.capture).toBe("idle");
   });
 });
